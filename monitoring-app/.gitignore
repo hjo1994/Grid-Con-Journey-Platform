@@ -1,0 +1,6 @@
+node_modules/
+build/
+*.tsbuildinfo
+# A lockfile generated here points at the public registry; it has to be
+# created in the company network (internal mirror), as in the AI Cockpit.
+package-lock.json
