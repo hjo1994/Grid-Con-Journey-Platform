@@ -13,7 +13,8 @@ Drei separate Deployments:
    Bronce-Tabelle) und BronceToSilver (BusinessTransactions und Anfragen,
    Polars, SQLite). Details:
    `input-orchestration/README.md`.
-2. **`backend/`** — FastAPI-Schnittstelle auf die Datenbank *(noch offen)*.
+2. **`backend/`** — read-only FastAPI-Schnittstelle (`/api/v1`) auf die
+   Silver-Tabellen. Details: `backend/README.md`.
 3. **`frontend/`** — React-Applikation *(noch offen)*.
 
 Datenmodell: [`solution documentation/LogicalDataModel.drawio`](solution%20documentation/LogicalDataModel.drawio),
