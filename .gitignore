@@ -37,3 +37,10 @@ standalone_admin_password.txt
 .idea/
 
 solution documentation/
+# Reste anderer Branches im selben Arbeitsordner
+/input-orchestration/
+/dags/
+/grid_con_ingestion/
+/tests/
+/pyproject.toml
+/requirements.txt
