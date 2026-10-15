@@ -34,3 +34,9 @@ standalone_admin_password.txt
 .idea/
 
 solution documentation/
+
+# Reste anderer Branches im selben Arbeitsordner
+node_modules/
+/monitoring-app/
+/backend/
+/input-orchestration/
