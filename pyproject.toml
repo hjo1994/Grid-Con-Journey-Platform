@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "grid-con-ingestion"
+version = "0.1.0"
+description = "Input Orchestration: Airflow DAG that imports grid connection requests from the C4C/GRONOS export into the central SQLite database."
+authors = ["Grid Con Customer Journey"]
+package-mode = false
+
+[tool.poetry.dependencies]
+# Airflow 2.10.2 der Plattform: Python 3.11, SQLAlchemy 1.4
+python = ">=3.11,<3.12"
+apache-airflow = "2.10.2"
+polars = ">=1.9"
+fastexcel = ">=0.12"
+pyarrow = ">=15"
+sqlalchemy = ">=1.4.36,<2.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8"
+
+[[tool.poetry.source]]
+name = "artifactstore-public"
+url = "https://artifactstore.belgrid.net/pypi/EGPython/simple"
+priority = "primary"
+
+[[tool.poetry.source]]
+name = "artifactstore-private"
+url = "https://artifactstore.belgrid.net/pypi/EGPythonPrivate/simple"
+priority = "primary"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

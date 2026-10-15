@@ -1,5 +1,5 @@
 # Source data (contains customer data — never commit)
-/input-orchestration/data/
+/data/
 *.xlsx
 *.xls
 
