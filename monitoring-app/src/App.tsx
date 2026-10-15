@@ -28,7 +28,8 @@ function latest(...values: (string | null | undefined)[]): string | null {
   return values.filter((v): v is string => !!v).sort().at(-1) ?? null;
 }
 
-export default function App() {
+/** `signOut`: show the sign-out link (only behind the OIDC login, see AuthApp.tsx). */
+export default function App({ signOut = false }: { signOut?: boolean }) {
   const [ref, setRef] = useState<Reference | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
 
@@ -105,6 +106,11 @@ export default function App() {
         <span className="sync">
           Datenstand <b className={asOf ? "" : "unknown"}>●</b> {asOf ?? "unbekannt"}
         </span>
+        {signOut && (
+          <a className="signout" href="/logout">
+            Abmelden
+          </a>
+        )}
       </header>
 
       <main className="body">

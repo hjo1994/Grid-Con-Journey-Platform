@@ -1,5 +1,5 @@
 # Source data (contains customer data — never commit)
-/input-orchestration/data/
+/data/
 *.xlsx
 *.xls
 
@@ -27,6 +27,9 @@ standalone_admin_password.txt
 .env
 .env.*
 !.env.example
+# monitoring-app build-time configuration (no secrets; OIDC values stay empty in the repo)
+!monitoring-app/.env.development
+!monitoring-app/.env.production
 
 # Editor / OS
 .DS_Store

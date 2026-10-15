@@ -20,9 +20,39 @@ def aggregate(client, query):
     return {i["key"]: (i["count"], i["sum_max_p"]) for i in resp.json()["items"]}
 
 
-def test_healthz_is_independent_of_the_database(tmp_path):
+def test_healthz_is_independent_of_the_database_and_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("EG_AUTH_DEV_MODE", "false")
     client = TestClient(get_app(tmp_path / "missing.db"))
     assert client.get("/api/healthz").json() == "OK"
+
+
+def test_every_data_endpoint_requires_authentication(client, monkeypatch):
+    monkeypatch.setenv("EG_AUTH_DEV_MODE", "false")
+    for path in [
+        BASE, f"{BASE}/aggregate?group_by=request_status", f"{BASE}/100",
+        "/api/v1/grid-connection-customers", f"/api/v1/grid-connection-customers/{CUSTOMER_A}",
+        f"/api/v1/grid-connection-customers/{CUSTOMER_A}/grid-connection-requests",
+        "/api/v1/request-statuses", "/api/v1/meta", "/api/auth/rights",
+    ]:
+        assert client.get(path).status_code == 401, path
+
+
+def test_auth_rights_follow_the_groups(client, monkeypatch):
+    body = client.get("/api/auth/rights").json()
+    assert body["rights"] == {"canViewGridConnectionRequests": True}
+    monkeypatch.setenv("EG_AUTH_DEV_GROUPS", '["some_other_group"]')
+    assert client.get("/api/auth/rights").json()["rights"] == {"canViewGridConnectionRequests": False}
+    # reading still works: the API only requires a signed-in user, not the right
+    assert client.get(BASE).status_code == 200
+
+
+def test_offline_swagger_ui_without_auth(client, monkeypatch):
+    monkeypatch.setenv("EG_AUTH_DEV_MODE", "false")
+    html = client.get("/api/docs").text
+    assert "/api/static/swagger-ui-bundle.js" in html and "/api/openapi.json" in html
+    assert client.get("/api/static/swagger-ui-bundle.js").status_code == 200
+    assert client.get("/api/openapi.json").json()["openapi"] == "3.0.3"
+    assert client.get("/docs").status_code == 404
 
 
 def test_missing_database_returns_503(tmp_path):
@@ -196,7 +226,7 @@ def test_meta(client):
 
 
 def test_openapi_lists_all_endpoints(client):
-    paths = client.get("/openapi.json").json()["paths"]
+    paths = client.get("/api/openapi.json").json()["paths"]
     assert set(paths) >= {
         "/api/v1/grid-connection-requests",
         "/api/v1/grid-connection-requests/aggregate",
@@ -206,6 +236,7 @@ def test_openapi_lists_all_endpoints(client):
         "/api/v1/grid-connection-customers/{customer_id}/grid-connection-requests",
         "/api/v1/request-statuses",
         "/api/v1/meta",
+        "/api/auth/rights",
     }
 
 

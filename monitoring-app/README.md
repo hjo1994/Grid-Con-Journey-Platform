@@ -37,6 +37,24 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
 - **ELO**: `document_url` enthält heute eine Referenz („Referenz-0001“), keine
   URL. Ein Link entsteht nur, wenn der Wert mit `http(s)://` beginnt.
 
+## Anmeldung
+
+Wie im AI-Cockpit-Frontend über `eg-auth-react` (internes Paket vom
+Firmen-Spiegel):
+
+- `src/main.tsx` lädt `AuthApp.tsx` (Routen `/login`, `/logout`, Rest hinter
+  `AuthGate`). Nicht angemeldete Nutzer landen auf `/login`, die Anmeldung
+  läuft per OIDC-Redirect. In der Kopfzeile steht dann „Abmelden“.
+- `src/api/client.ts` bleibt bei `fetch` (Abbruch per `AbortSignal`,
+  wiederholte Query-Parameter) und hängt das Access-Token als
+  `Authorization: Bearer …` an (`src/shared/auth/accessToken.ts`). 401 und
+  403 haben eigene Meldungen.
+- OIDC-Werte in `.env.development` / `.env.production` (`VITE_OIDC_CLIENT_ID`,
+  `VITE_OIDC_AUTHORITY`, `VITE_OIDC_REQUEST_GROUPS`), im Repo leer.
+- **Außerhalb des Firmennetzes:** `VITE_AUTH_DEV_BYPASS="true"` in
+  `.env.development.local` und Backend mit `EG_AUTH_DEV_MODE=True`. Der
+  Bypass greift nur im Dev-Server, nie im Production-Build.
+
 ## Konfiguration (Build-Zeit)
 
 Siehe `.env.example`. Lokal in `.env.local` (gitignored):
@@ -67,8 +85,9 @@ ist gitignored und muss im Firmennetz erzeugt werden.
 
 ## Offen
 
-- **Authentifizierung**: keine, weil das Backend noch keine hat. Wird wie im
-  AI Cockpit über `eg-auth-react` nachgezogen.
+- **OIDC-Client**: Grid Con braucht einen eigenen Client beim
+  AAP-Authenticator; bis dahin sind `VITE_OIDC_*` leer und die Gruppe ist der
+  Platzhalter aus dem AI Cockpit.
 - **C4C-URL-Schema** und ob `document_url` künftig echte ELO-Links enthält.
 
 ## Verifiziert

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.auth import authorizer
 from app.db import get_session
 from app.models import GridConnectionCustomer as Customer
 from app.models import GridConnectionRequest as Request
@@ -27,7 +28,7 @@ from app.schemas import (
     RequestWithCustomerOut,
 )
 
-router = APIRouter(prefix="/api/v1/grid-connection-requests", tags=["grid-connection-requests"])
+router = APIRouter(prefix="/api/v1/grid-connection-requests", tags=["grid-connection-requests"], dependencies=[authorizer()])
 
 SortField = Literal[
     "id_gronos_new",

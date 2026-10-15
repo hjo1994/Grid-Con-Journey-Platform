@@ -23,6 +23,14 @@ def _request(id_, ticket, project, status, tech, max_p, ts, customer=CUSTOMER_A,
     )
 
 
+@pytest.fixture(autouse=True)
+def dev_auth(monkeypatch):
+    # The eg-auth stub only supports dev mode; tests that need "signed out"
+    # switch it off again.
+    monkeypatch.setenv("EG_AUTH_DEV_MODE", "true")
+    monkeypatch.setenv("EG_AUTH_DEV_GROUPS", '["app_50hzt_aap_communities_all__x"]')
+
+
 @pytest.fixture()
 def db_path(tmp_path):
     """Synthetic data, no real customers:

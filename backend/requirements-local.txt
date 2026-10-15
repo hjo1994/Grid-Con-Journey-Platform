@@ -1,9 +1,11 @@
 # Local development WITHOUT Poetry and WITHOUT access to the company mirror.
-# Mirrors pyproject.toml (versions as in the AI Cockpit backend). Keep in sync
-# with pyproject.toml. The cluster build uses pyproject.toml + poetry.lock only.
+# Mirrors pyproject.toml (versions as in the AI Cockpit backend); eg-auth is
+# missing on purpose — local_stubs/eg_auth stands in. Keep in sync with pyproject.toml. The cluster build uses pyproject.toml + poetry.lock only.
 fastapi==0.115.14
 uvicorn[standard]==0.23.2
 sqlalchemy==2.0.46
 pydantic==2.12.5
+pydantic-settings==2.12.0
+swagger-ui-bundle==1.1.0
 pytest==7.4.4
 httpx==0.28.1

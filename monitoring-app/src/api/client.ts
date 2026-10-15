@@ -9,6 +9,7 @@ import type {
   SortField,
   SortOrder,
 } from "./types";
+import { authHeaders } from "../shared/auth/accessToken";
 
 const BASE = (import.meta.env.VITE_API_BASE || "/api/v1").replace(/\/$/, "");
 const MAX_LIMIT = 500; // backend maximum
@@ -25,6 +26,8 @@ export class ApiError extends Error {
 // The backend's `detail` texts are not shown; the UI has its own message per status.
 function messageFor(status: number | null): string {
   if (status === null) return "Das Backend ist nicht erreichbar.";
+  if (status === 401) return "Du bist nicht angemeldet oder die Sitzung ist abgelaufen. Bitte melde dich neu an.";
+  if (status === 403) return "Dir fehlt die Berechtigung für diese Daten.";
   if (status === 404) return "Die Anfrage wurde nicht gefunden.";
   if (status === 503) return "Die Datenbank ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.";
   return `Die Daten konnten nicht geladen werden (HTTP ${status}).`;
@@ -46,7 +49,8 @@ export function buildUrl(path: string, params: Params = {}): string {
 async function get<T>(path: string, params?: Params, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(buildUrl(path, params), { headers: { Accept: "application/json" }, signal });
+    const headers = { Accept: "application/json", ...(await authHeaders()) };
+    res = await fetch(buildUrl(path, params), { headers, signal });
   } catch (err) {
     if ((err as Error).name === "AbortError") throw err;
     throw new ApiError(null, messageFor(null));

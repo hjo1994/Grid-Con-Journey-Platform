@@ -7,12 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import API_VERSION, status_catalogue
+from app.auth import authorizer
 from app.db import get_session
 from app.models import GridConnectionRequest as Request
 from app.queries import data_as_of
 from app.schemas import Meta, RequestStatusOut
 
-router = APIRouter(prefix="/api/v1", tags=["reference"])
+router = APIRouter(prefix="/api/v1", tags=["reference"], dependencies=[authorizer()])
 
 
 @router.get("/request-statuses", response_model=list[RequestStatusOut])

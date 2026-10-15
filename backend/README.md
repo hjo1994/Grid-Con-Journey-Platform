@@ -6,8 +6,9 @@ Ansichten einer bestimmten App: Darstellungslogik (Prozessschritt,
 C4C-Deeplink, Widget-Zuschnitt) rechnet der jeweilige Konsument. Kein
 Schreibpfad.
 
-Interaktive Doku (OpenAPI, von FastAPI erzeugt): `/docs`, Schema unter
-`/openapi.json`.
+Interaktive Doku: `/api/docs` (Swagger UI offline aus `swagger-ui-bundle`,
+ohne CDN, `app/docs.py`), Schema unter `/api/openapi.json` (OpenAPI 3.0.3).
+Beides ohne Anmeldung.
 
 ## Endpunkte (`/api/v1`)
 
@@ -21,7 +22,8 @@ Interaktive Doku (OpenAPI, von FastAPI erzeugt): `/docs`, Schema unter
 | `GET /grid-connection-customers/{id}/grid-connection-requests` | Anfragen des Kunden, gleiche Parameter wie die Liste |
 | `GET /request-statuses` | Status mit `order`, `phase`, `in_process` aus der Backend-Konfiguration, danach Status aus den Daten, die nicht konfiguriert sind (`configured: false`, `order: null`) |
 | `GET /meta` | `api_version`, `data_as_of` |
-| `GET /api/healthz` | Liveness, prüft nicht die DB |
+| `GET /api/healthz` | Liveness, ohne Auth, prüft nicht die DB |
+| `GET /api/auth/rights` | angemeldeter Nutzer und seine Rechte (für das Frontend) |
 
 **Feldnamen:** die Silver-Spalten in snake_case (`RequestStatus` →
 `request_status`, `maxP` → `max_p`, `CustomerID` → `customer_id`). Zeitstempel
@@ -38,6 +40,26 @@ weder „Wind Onshore“ noch „Windkraft“).
 **Sortierung:** `sort=request_status` folgt der Prozessreihenfolge aus
 `/request-statuses`, nicht dem Alphabet. Fehlende Werte stehen in beiden
 Richtungen am Ende (portabel über `IS NULL`, kein `NULLS LAST`).
+
+## Authentifizierung
+
+Wie im AI-Cockpit-Backend: `eg-auth` mit `authorizer()` als
+Router-Abhängigkeit (`app/auth.py`). Alle Endpunkte unter `/api/v1` und
+`/api/auth/rights` verlangen einen angemeldeten Nutzer, `/api/healthz` und
+die Doku nicht. Gesteuert über `EG_AUTH_DEV_MODE` und `EG_AUTH_DEV_GROUPS`
+(siehe `.env.example`).
+
+- **Im Cluster:** `eg-auth` (Extra `fastapi`, Version 1.0.0) kommt vom
+  Firmen-Spiegel (`pyproject.toml`); `EG_AUTH_DEV_MODE=False`. Dann prüft das
+  echte Paket das OIDC-Token.
+- **Lokal:** `local_stubs/eg_auth` mit `EG_AUTH_DEV_MODE=True`; `app/main.py`
+  hängt den Stub nur dann an den `sys.path`. Der Stub kann nur den Dev-Modus
+  und antwortet sonst mit 401, siehe `local_stubs/README.md`.
+- **Rechte:** Aktuell genügt Anmeldung. `canViewGridConnectionRequests` wird
+  aus einer Platzhaltergruppe des AI Cockpit abgeleitet und ist nur
+  informativ, bis die Grid-Con-Gruppe feststeht (TODO in `app/auth.py`).
+- Getestet gegen den **Stub** (Gating, 401 ohne Anmeldung, Rechte aus
+  Gruppen). Das Verhalten des echten `eg-auth` ist nicht geprüft.
 
 ## Status-Konfiguration
 
@@ -67,39 +89,43 @@ backend/
   pyproject.toml           # Poetry-Format (Cluster-Build)
   requirements-local.txt   # nur lokal, ohne Poetry/Spiegel
   app/
-    main.py          # get_app() — mit uvicorn als Factory starten
+    main.py          # get_app(); app = get_app() für uvicorn
+    auth.py          # eg-auth: Rights, authorizer(), /api/auth/rights
+    docs.py          # Swagger UI offline unter /api/docs
     config.py        # GRID_CON_DB_PATH (Default /data/db/grid_con.db), Status-Katalog
     db.py            # read-only Engine, Session mit Retry
     models.py        # Kopie der Silver-Modelle aus input-orchestration (von Hand synchron halten)
     queries.py       # gemeinsame Filter, "neuester Eintrag je Ticket"
     schemas.py
     api/requests.py, api/customers.py, api/reference.py
+  local_stubs/eg_auth/     # Stub von eg-auth, nur lokal
   tests/             # synthetische Test-DB, keine echten Daten
 ```
 
 `app/models.py` ist eine von Hand gepflegte Kopie des Silver-Teils von
-`input-orchestration/grid_con_ingestion/models.py` (separate Images, kein
-gemeinsames Paket). Bronce (`C4CExports`) liest das Backend nicht.
+`grid_con_ingestion/models.py` im Branch `dedicated_env/input_orchestration`
+(separate Deployments, kein gemeinsames Paket). Bronce (`C4CExports`) liest das Backend nicht.
 
 ## Lokal starten
 
 ```bash
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-local.txt
-GRID_CON_DB_PATH=../input-orchestration/data/db/grid_con.db \
-  .venv/bin/uvicorn app.main:get_app --factory --port 8000
+EG_AUTH_DEV_MODE=True EG_AUTH_DEV_GROUPS='["app_50hzt_aap_communities_all__x"]' \
+GRID_CON_DB_PATH=/pfad/zu/grid_con.db \
+  .venv/bin/uvicorn app.main:app --port 8000
 .venv/bin/python -m pytest
 ```
 
 Startkommando im Deployment:
-`uvicorn app.main:get_app --factory --host 0.0.0.0 --port 8000`.
-ConfigMap: `GRID_CON_DB_PATH` (Volume read-only). Die `poetry.lock` fehlt noch
+`uvicorn app.main:app --host 0.0.0.0 --port 8000` (ohne `PYTHONPATH`).
+ConfigMap: `GRID_CON_DB_PATH` (Volume read-only), `EG_AUTH_DEV_MODE=False`. Die `poetry.lock` fehlt noch
 und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
 
 ## Offen
 
-- **Authentifizierung:** noch keine. Das AI-Cockpit-Backend nutzt `eg-auth`;
-  das wird nachgezogen, sobald die Gruppen feststehen.
+- **Berechtigungsgruppe:** Platzhalter aus dem AI Cockpit, bis Grid Con
+  einen eigenen OIDC-Client und eine eigene Gruppe hat.
 - **Ticket-Schlüssel:** Die API identifiziert ein Ticket über `id_gronos_new`
   (abgestimmt). Input Orchestration behandelt dagegen Ticketname + Ticket-ID
   als Ticket. In der aktuellen DB hat die Ticket-ID 23322 Einträge unter drei
@@ -108,11 +134,11 @@ und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
 
 ## Verifiziert
 
-23 Tests gegen eine synthetische Test-DB (aktueller Stand vs. Historie,
+27 Tests gegen eine synthetische Test-DB (aktueller Stand vs. Historie,
 alle Filter, Suche inkl. `%`/`_`-Escaping, Sortierung nach Prozessreihenfolge
 und mit NULLs, Paginierung, Detail mit/ohne Kunde, Aggregation inkl.
 `split_multi`, Kunden, Status-Katalog, Meta, OpenAPI, Read-only,
-Datei-Austausch per Rename, 503). Lauf gegen `grid_con.db` vom 13.10.2026:
+Datei-Austausch per Rename, 503, Auth-Gating, Rechte, Offline-Doku). Lauf gegen `grid_con.db` vom 13.10.2026:
 249 Anfragen (251 Einträge), 122 Kunden; Stichproben (Anzahl je Status,
 MW-Summe, Technologie-Filter, aktive Anfragen) stimmen mit direktem SQL
 überein.

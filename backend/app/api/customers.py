@@ -7,12 +7,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.requests import Limit, Offset, Order, Sort, list_requests
+from app.auth import authorizer
 from app.db import get_session
 from app.models import GridConnectionCustomer as Customer
 from app.queries import BaseRequestFilters, escape_like
 from app.schemas import CustomerOut, CustomerPage, RequestPage
 
-router = APIRouter(prefix="/api/v1/grid-connection-customers", tags=["grid-connection-customers"])
+router = APIRouter(prefix="/api/v1/grid-connection-customers", tags=["grid-connection-customers"], dependencies=[authorizer()])
 
 _SORT_COLUMNS = {
     "customer_name": Customer.CustomerName,
