@@ -13,6 +13,10 @@ import sys
 
 TMP_PACKAGES_DIR = "/tmp/airflow_packages"
 
+os.makedirs(TMP_PACKAGES_DIR, exist_ok=True)
+if TMP_PACKAGES_DIR not in sys.path:        
+    sys.path.insert(0, TMP_PACKAGES_DIR)
+
 # (Import-Name, pip-Name)
 REQUIRED_PACKAGES = [
     ("polars", "polars"),
