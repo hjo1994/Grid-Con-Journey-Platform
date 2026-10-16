@@ -12,13 +12,15 @@ from __future__ import annotations
 import datetime
 import os
 import site
+import sys
 
 # Das Repo liegt als Ganzes im DAG-Ordner: Projektwurzel (grid_con_ingestion)
 # importierbar machen und fehlende Pakete nachinstallieren, bevor die
 # Operatoren polars importieren (siehe dependency_loader.py).
 _DAG_DIR = os.path.dirname(os.path.abspath(__file__))
-site.addsitedir(_DAG_DIR)
-site.addsitedir(os.path.dirname(_DAG_DIR))
+sys.path.insert(0, "/tmp/airflow_packages")
+sys.path.insert(0, _DAG_DIR)
+sys.path.insert(0, os.path.dirname(_DAG_DIR))
 import dependency_loader  # noqa: E402,F401
 
 from airflow import DAG  # noqa: E402
