@@ -18,9 +18,8 @@ import sys
 # importierbar machen und fehlende Pakete nachinstallieren, bevor die
 # Operatoren polars importieren (siehe dependency_loader.py).
 _DAG_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, "/tmp/airflow_packages")
-sys.path.insert(0, _DAG_DIR)
-sys.path.insert(0, os.path.dirname(_DAG_DIR))
+site.addsitedir(_DAG_DIR)
+
 import dependency_loader  # noqa: E402,F401
 
 from airflow import DAG  # noqa: E402
