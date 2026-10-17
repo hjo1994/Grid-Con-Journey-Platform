@@ -19,6 +19,8 @@ import sys
 # Operatoren polars importieren (siehe dependency_loader.py).
 _DAG_DIR = os.path.dirname(os.path.abspath(__file__))
 site.addsitedir(_DAG_DIR)
+sys.path.insert(0, '$AIRFLOW_HOME/grid_con_ingestion/operators')
+sys.path.insert(0, '$AIRFLOW_HOME/grid_con_ingestion/transforms')
 
 import dependency_loader  # noqa: E402,F401
 
