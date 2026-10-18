@@ -1,81 +1,104 @@
+"""Installiert fehlende Python-Pakete zur Laufzeit nach /tmp/airflow_packages.
+
+Das Airflow-Image der Plattform bringt polars und fastexcel nicht mit, und
+/tmp ist nach jedem Deployment leer. Beim Parsen des DAGs wird geprüft, ob
+die Pakete importierbar sind; fehlende werden per pip installiert. Anders als
+früher wartet der Loader auf pip (höchstens WAIT_SECONDS), damit schon der
+erste Parse nach einem Deployment die Operatoren importieren kann.
+
+Dauert pip länger, läuft es im Hintergrund weiter und entfernt die Lock-Datei
+selbst, sobald es fertig ist; der nächste Parse wartet dann erneut bzw. findet
+die Pakete. Eine Lock-Datei, die älter als STALE_LOCK_SECONDS ist (z. B. weil
+pip abgebrochen wurde), wird ignoriert und neu angelegt.
+"""
+import importlib
 import os
-import sys
+import shlex
 import subprocess
-import site
+import sys
+import time
+
+TMP_PACKAGES_DIR = "/tmp/airflow_packages"
+LOCK_FILE = os.path.join(TMP_PACKAGES_DIR, "pip.lock")
+PIP_LOG = os.path.join(TMP_PACKAGES_DIR, "pip.log")
+
+# (Import-Name, pip-Name) – pyarrow wird vom Code nicht gebraucht.
+REQUIRED_PACKAGES = [
+    ("polars", "polars"),
+    ("fastexcel", "fastexcel"),
+]
+
+# Muss unter [core] dag_file_processor_timeout bleiben (Standard 50 s).
+WAIT_SECONDS = int(os.environ.get("GRID_CON_PIP_WAIT_SECONDS", "40"))
+STALE_LOCK_SECONDS = 15 * 60
 
 
-def ensure_dependencies():
-    tmp_packages_dir = "/tmp/airflow_packages"
-
-    if not os.path.exists(tmp_packages_dir):
-        os.makedirs(tmp_packages_dir, exist_ok=True)
-
-    if tmp_packages_dir not in sys.path:
-        site.addsitedir(tmp_packages_dir)
-
-    required_packages = [
-        ("polars", "polars"),
-        ("fastexcel", "fastexcel"),
-        ("pyarrow", "pyarrow")
-    ]
-
+def _missing() -> list[str]:
+    importlib.invalidate_caches()  # neu installierte Pakete sichtbar machen
     missing = []
-
-    for import_name, pip_name in required_packages:
+    for import_name, pip_name in REQUIRED_PACKAGES:
         try:
             __import__(import_name)
         except ImportError:
             missing.append(pip_name)
+    return missing
 
+
+def _lock_is_fresh() -> bool:
+    try:
+        return time.time() - os.path.getmtime(LOCK_FILE) < STALE_LOCK_SECONDS
+    except FileNotFoundError:
+        return False
+
+
+def _wait_for_lock(deadline: float) -> None:
+    while _lock_is_fresh() and time.time() < deadline:
+        time.sleep(1)
+
+
+def ensure_dependencies() -> None:
+    os.makedirs(TMP_PACKAGES_DIR, exist_ok=True)
+    if TMP_PACKAGES_DIR not in sys.path:
+        sys.path.insert(0, TMP_PACKAGES_DIR)
+
+    missing = _missing()
     if not missing:
         return
 
-    lock_file = os.path.join(tmp_packages_dir, "pip.lock")
+    deadline = time.time() + WAIT_SECONDS
 
-    if os.path.exists(lock_file):
-        print(
-            f"Auto-Installer: Installation läuft bereits im Hintergrund. "
-            f"Fehlende Pakete: {', '.join(missing)}"
+    if _lock_is_fresh():
+        print(f"Auto-Installer: Installation läuft bereits, warte auf: {', '.join(missing)}")
+    else:
+        print(f"Auto-Installer: Installiere {', '.join(missing)} nach {TMP_PACKAGES_DIR} ...")
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        env = os.environ.copy()
+        env["PIP_USER"] = "false"
+        pip_cmd = " ".join(
+            shlex.quote(part)
+            for part in [sys.executable, "-m", "pip", "install", f"--target={TMP_PACKAGES_DIR}",
+                         "--no-cache-dir", *missing]
         )
-        return
-
-    print(
-        f"Auto-Installer: Fehlende Pakete erkannt: {', '.join(missing)}. "
-        "Starte Hintergrund-Installation..."
-    )
-
-    try:
-        with open(lock_file, "w") as f:
-            f.write("running")
-
-        clean_env = os.environ.copy()
-        clean_env["PIP_USER"] = "false"
-
+        # Lock-Datei entfernt pip selbst, wenn es fertig ist – auch wenn wir
+        # nicht bis zum Ende warten. Ausgabe landet in pip.log zur Fehlersuche.
         subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--target=" + tmp_packages_dir,
-                "--no-cache-dir",
-                *missing,
-            ],
-            env=clean_env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            f"{pip_cmd} > {shlex.quote(PIP_LOG)} 2>&1; rm -f {shlex.quote(LOCK_FILE)}",
+            shell=True,
+            env=env,
+            start_new_session=True,  # pip überlebt das Ende des Parse-Prozesses
         )
 
+    _wait_for_lock(deadline)
+
+    missing = _missing()
+    if missing:
         print(
-            f"Auto-Installer: Installation gestartet für: "
-            f"{', '.join(missing)}"
+            f"Auto-Installer: {', '.join(missing)} noch nicht verfügbar "
+            f"(pip läuft weiter, siehe {PIP_LOG}); nächster Parse versucht es erneut."
         )
-
-    except Exception as e:
-        print(f"Auto-Installer Fehler beim Starten von PIP: {e}")
-
-        if os.path.exists(lock_file):
-            os.remove(lock_file)
+    else:
+        print("Auto-Installer: Pakete verfügbar.")
 
 
 ensure_dependencies()

@@ -14,12 +14,8 @@ Ergebnis von :func:`transform` ist ein :class:`SilverResult` mit
 Enthält der Eingang die Spalte ``C4CExportID`` (Zeilen aus der Bronce-Tabelle),
 wird sie an ``requests`` durchgereicht.
 """
-from __future__ import annotations
-import sys
-sys.path.insert(0, '/tmp/airflow_packages')
 
-import os
-print("DEBUG", os.getuid(), sys.executable, sys.version, sys.path[:3], os.listdir("/tmp/airflow_packages"))
+from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
