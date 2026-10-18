@@ -18,6 +18,9 @@ from __future__ import annotations
 import sys
 sys.path.insert(0, '/tmp/airflow_packages')
 
+import os
+print("DEBUG", os.getuid(), sys.executable, sys.version, sys.path[:3], os.listdir("/tmp/airflow_packages"))
+
 import logging
 from dataclasses import dataclass
 from pathlib import Path
