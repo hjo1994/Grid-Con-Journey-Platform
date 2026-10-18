@@ -16,6 +16,7 @@ wird sie an ``requests`` durchgereicht.
 """
 
 from __future__ import annotations
+sys.path.insert(0, '/tmp/airflow_packages')
 
 import logging
 from dataclasses import dataclass
