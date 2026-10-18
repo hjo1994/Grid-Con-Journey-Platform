@@ -3,7 +3,7 @@ legt sie as is in Bronce (C4CExports) ab und lädt daraus die
 Netzanschlussanfragen nach Silver – beides in der zentralen SQLite-Datenbank
 (data/db).
 
-    wait_for_source  ──►  raw_to_bronce  ──►  bronce_to_silver
+    wait_for_source  -->  raw_to_bronce  -->  bronce_to_silver
 
 Single writer: max_active_runs=1, atomarer Datei-Tausch im Writer.
 """
