@@ -25,13 +25,16 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+import importlib
+importlib.invalidate_caches()
 try:
     import polars as pl
 except ImportError as e:
-    import os
+    import os, socket, datetime
+    _t = "/tmp/airflow_packages"
     raise ImportError(
-        f"DEBUG uid={os.getuid()} exe={sys.executable} path={sys.path[:4]} "
-        f"tmp={os.listdir('/tmp/airflow_packages') if os.path.isdir('/tmp/airflow_packages') else 'FEHLT'}"
+        f"DEBUG {datetime.datetime.now():%H:%M:%S} host={socket.gethostname()} "
+        f"polars_da={os.path.isdir(_t + '/polars')} tmp={sorted(os.listdir(_t)) if os.path.isdir(_t) else 'FEHLT'}"
     ) from e
 
 log = logging.getLogger(__name__)
