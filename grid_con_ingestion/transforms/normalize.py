@@ -25,7 +25,14 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import polars as pl
+try:
+    import polars as pl
+except ImportError as e:
+    import os
+    raise ImportError(
+        f"DEBUG uid={os.getuid()} exe={sys.executable} path={sys.path[:4]} "
+        f"tmp={os.listdir('/tmp/airflow_packages') if os.path.isdir('/tmp/airflow_packages') else 'FEHLT'}"
+    ) from e
 
 log = logging.getLogger(__name__)
 
