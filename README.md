@@ -17,7 +17,8 @@ Drei separate Deployments:
    Silver-Tabellen. Details: `backend/README.md`.
 3. **`frontend/`** — React-Applikation *(noch offen)*.
 
-Datenmodell: [`solution documentation/LogicalDataModel.drawio`](solution%20documentation/LogicalDataModel.drawio),
+Datenmodell: `solution documentation/LogicalDataModel.drawio` (wird lokal gepflegt,
+nicht im Repo, siehe `.gitignore`),
 umgesetzt in `input-orchestration/grid_con_ingestion/models.py`.
 
 ## Datenbank (Interim)

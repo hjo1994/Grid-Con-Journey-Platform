@@ -33,3 +33,6 @@ standalone_admin_password.txt
 .vscode/
 .idea/
 solution documentation/
+
+# Solution documentation (draw.io) is maintained locally, not in the repo
+/solution documentation/
