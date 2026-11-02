@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 import type { Customer, GridConnectionRequest, RequestStatus } from "../api/types";
-import { fmtDateTime, fmtMW } from "../domain/format";
-import { c4cTicketUrl, documentHref } from "../domain/links";
+import { fmtCoordinates, fmtDate, fmtDateTime, fmtMW, fmtYesNo } from "../domain/format";
+import { c4cTicketUrl, documentHref, documentNames, mapUrl } from "../domain/links";
 import { progressOf } from "../domain/status";
 import { StatusPill } from "./small";
 
@@ -33,6 +33,12 @@ export function DetailPanel({ request: r, customer, catalogue }: Props) {
   const { step, total } = progressOf(r.request_status, catalogue);
   const c4c = c4cTicketUrl(r.id_gronos_new);
   const doc = documentHref(r.document_url);
+  // Requests from the GRONOS API carry an objectId; Excel-import rows don't
+  // have the API-only columns, so those rows are not shown for them.
+  const gronos = Boolean(r.gronos_object_id);
+  const docNames = gronos ? documentNames(r.document_url) : [];
+  const coords = fmtCoordinates(r.latitude, r.longitude);
+  const map = mapUrl(r.latitude, r.longitude);
 
   return (
     <aside className="detail" aria-live="polite" aria-label="Details zur Anfrage">
@@ -65,6 +71,10 @@ export function DetailPanel({ request: r, customer, catalogue }: Props) {
             <a className="lk" href={doc} target="_blank" rel="noreferrer">
               Antragsdokumente in ELO ↗
             </a>
+          ) : gronos ? (
+            <span className={`lk ${docNames.length ? "static" : "off"}`} title="Dateinamen aus GRONOS, kein direkter Link">
+              Dokumente in GRONOS <small>{docNames.length ? `${docNames.length} Datei${docNames.length > 1 ? "en" : ""}` : "keine"}</small>
+            </span>
           ) : (
             <span className={`lk ${r.document_url ? "" : "off"}`} title={r.document_url ? "Referenz, kein direkter Link" : undefined}>
               Antragsdokumente in ELO <small>{r.document_url ?? "kein Link"}</small>
@@ -80,7 +90,29 @@ export function DetailPanel({ request: r, customer, catalogue }: Props) {
             </span>
           )}
         </div>
+        {docNames.length > 0 && (
+          <ul className="files" aria-label="Dokumente in GRONOS">
+            {docNames.map((n, i) => (
+              <li key={`${i}-${n}`} className="mono">
+                {n}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
+
+      {gronos && (
+        <div className="sec">
+          <div className="lbl">Verfahren in GRONOS</div>
+          <dl className="dl">
+            <Row label="Projektphase" value={r.project_phase ?? null} mono />
+            <Row label="Nächster Akteur" value={r.next_actor ?? null} mono />
+            <Row label="VNB kontaktiert" value={fmtYesNo(r.dso_contacted)} />
+            <Row label="VNB-Rückmeldung" value={r.dso_response ?? null} mono />
+          </dl>
+          <span className="dim small">Werte als GRONOS-Code, Klartext folgt mit der Code-Liste.</span>
+        </div>
+      )}
 
       <div className="sec">
         <div className="lbl">Netzanschluss</div>
@@ -89,12 +121,34 @@ export function DetailPanel({ request: r, customer, catalogue }: Props) {
           <Row label="Umspannwerk" value={r.substation_50hertz} mono />
           <Row label="Standort" value={r.substation_location} mono />
           <Row label="Schaltfelder" value={r.switch_count} />
+          {gronos && (
+            <>
+              <Row label="Inbetriebnahme" value={fmtDate(r.commissioning_date)} />
+              <Row
+                label="Koordinaten"
+                value={
+                  coords && map ? (
+                    <a href={map} target="_blank" rel="noreferrer" title="In OpenStreetMap öffnen">
+                      {coords} ↗
+                    </a>
+                  ) : null
+                }
+                mono
+              />
+            </>
+          )}
         </dl>
       </div>
 
       <div className="sec">
-        <div className="lbl">Ansprechpartner</div>
+        <div className="lbl">Kunde und Ansprechpartner</div>
         <dl className="dl">
+          {customer?.company_id && (
+            <>
+              <Row label="Firmen-ID" value={customer.company_id} mono />
+              <Row label="USt-IdNr." value={customer.vat_number ?? null} mono />
+            </>
+          )}
           <Row label="Name" value={customer?.customer_contact_person ?? null} />
           <Row
             label="E-Mail"
@@ -118,7 +172,9 @@ export function DetailPanel({ request: r, customer, catalogue }: Props) {
       <div className="sec">
         <div className="lbl">Stand</div>
         <dl className="dl">
-          <Row label="Zuletzt aktualisiert" value={fmtDateTime(r.timestamp)} />
+          {gronos && <Row label="Geändert in GRONOS" value={fmtDateTime(r.source_updated_at ?? null)} />}
+          <Row label="Importiert" value={fmtDateTime(r.timestamp)} />
+          {gronos && <Row label="GRONOS-ID" value={r.gronos_object_id ?? null} mono />}
         </dl>
       </div>
     </aside>
