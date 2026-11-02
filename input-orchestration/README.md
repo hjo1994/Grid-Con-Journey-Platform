@@ -1,4 +1,59 @@
-# Input Orchestration — Airflow DAG
+# Input Orchestration — Airflow DAGs
+
+## GRONOS-API (neu, `dags/gronos_import_dags.py`)
+
+Zwei DAGs, Datenmodell siehe `solution documentation/LogicalDataModel.drawio`
+(PROPOSAL v3):
+
+```
+gronos_raw_to_bronze     (Schedule, Standard alle 30 min)
+  raw_to_bronze  ──►  trigger_bronze_to_silver  ──► gronos_bronze_to_silver
+                      (wartet auf das Ende)            bronze_to_silver
+```
+
+1. **`raw_to_bronze`** (`grid_con_ingestion/gronos/store.py`, `raw_to_bronze`)
+   — OAuth-Token (Client Credentials), Liste aller Anfragen über
+   `ConnectionRequest?companyId=<Präfix>*` (ein `*` allein läuft in einen
+   Gateway-Timeout; Präfixe mit 502/503/504 werden bis 7 Stellen in ihre zehn
+   Unterpräfixe geteilt), Duplikate über `objectId` entfernt. Nur neue
+   objectIds und solche mit neuerem `updatedAt` als in Bronze
+   (`MAX(json_extract(Content,'$.updatedAt'))`) werden per Detail-Endpunkt
+   geholt und als eine Zeile je Anfrage an **`GronosExports`** angehängt:
+   `ID`, `Timestamp` (Abrufzeitpunkt, UTC, gleich für den ganzen Abruf),
+   `Content` (JSON der Anfrage as is). Bei einem API-Fehler schlägt der Task
+   fehl, ohne etwas zu schreiben.
+2. **`bronze_to_silver`** (`gronos/store.py`, `bronze_to_silver`) — wird
+   nach jedem erfolgreichen RawToBronze-Lauf ausgelöst. Liest alle
+   `GronosExports` mit `Timestamp` > `MAX(BusinessTransactions.TimestampImportBronze)`
+   (erster Lauf: alles), wandelt `Content` um (`gronos/transform.py`), legt
+   Kunden über `CompanyID` an bzw. aktualisiert sie, und schreibt je
+   Bronze-Zeile eine `BusinessTransactions`-Zeile (`GronosExportID`,
+   `TimestampImportBronze`, `TimestampImportSilver`). Ein neuer Eintrag in
+   `GridConnectionRequests` (neue UUID, `timestamp` = Silver-Import) entsteht
+   nur, wenn sich die Werte gegenüber dem neuesten Eintrag derselben
+   `GronosObjectID` geändert haben (ein neues `updatedAt` allein zählt nicht).
+
+Konfiguration (Env-Variablen, `grid_con_ingestion/config.py`):
+
+| Variable | Standard | |
+|---|---|---|
+| `GRONOS_API_BASE_URL` | – | z. B. `https://eliagroup-111-dev.test.apimanagement.eu10.hana.ondemand.com` |
+| `GRONOS_API_CLIENT_ID` / `GRONOS_API_CLIENT_SECRET` | – | aus einem OpenShift-Secret, nie im Repo |
+| `GRONOS_COMPANY_ID_PREFIXES` | `1000-1299` | Bereiche/Einzelwerte, kommagetrennt |
+| `GRONOS_MAX_PREFIX_LENGTH` | `7` | |
+| `GRONOS_API_TIMEOUT` | `150` | Sekunden je Aufruf |
+| `GRONOS_API_USE_ENV_PROXY` | `false` | API ist vom Pod ohne Proxy erreichbar |
+| `GRONOS_RAW_TO_BRONZE_SCHEDULE` | `*/30 * * * *` | |
+
+Beide DAGs schreiben über `writer.atomic_write`, das die Datenbank zusätzlich
+per Dateisperre (`grid_con.db.lock`) gegen parallele Schreiber schützt.
+
+**Bestehende Datenbank:** `BusinessTransactions.C4CExportID` war `NOT NULL`;
+SQLite kann das nicht nachträglich ändern. Vor dem ersten GRONOS-Lauf muss die
+Datenbank daher neu aufgebaut werden (vorher Dump ziehen).
+
+## Excel-Export (bisher, `dags/grid_connection_requests_import_dag.py`)
+
 
 Eigenes Deployment. Ein DAG (`dags/grid_connection_requests_import_dag.py`)
 mit drei Tasks entlang der Layer aus `solution documentation/Architecture.drawio`:
@@ -48,12 +103,17 @@ input-orchestration/
   scripts/
     run_local.sh              # lokaler Airflow-Lauf ohne Docker/K8s
   dags/
+    gronos_import_dags.py     # gronos_raw_to_bronze + gronos_bronze_to_silver
     grid_connection_requests_import_dag.py
   grid_con_ingestion/
     config.py                 # SOURCE_DIR, GRID_CON_DB_PATH etc. aus Env-Variablen
     models.py                 # SQLAlchemy-Modelle = LogicalDataModel.drawio (Bronce + Silver)
     sources.py                # DataSource-Interface: FileSource, ApiSource (Platzhalter)
-    writer.py                 # Bronce/Silver laden, atomarer Datei-Tausch
+    writer.py                 # Bronce/Silver laden, atomarer Datei-Tausch, Schreibsperre
+    gronos/
+      client.py               # GRONOS-API: Token, Liste je Präfix, Detail
+      transform.py            # Content (JSON) → Silver-Werte
+      store.py                # raw_to_bronze, bronze_to_silver
     migrations/
       customers.py            # Einmal-Migration der Kunden aus dem Export
     transforms/
@@ -62,6 +122,8 @@ input-orchestration/
       source_sensor.py
       raw_to_bronce.py
       bronce_to_silver.py
+      gronos_raw_to_bronze.py
+      gronos_bronze_to_silver.py
   tests/
 ```
 

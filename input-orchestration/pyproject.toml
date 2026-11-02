@@ -1,13 +1,14 @@
 [project]
 name = "grid-con-ingestion"
 version = "0.1.0"
-description = "Input Orchestration: Airflow DAG that imports grid connection requests from the C4C/GRONOS export into the central SQLite database."
+description = "Input Orchestration: Airflow DAGs that import grid connection requests from the GRONOS API (and the C4C export) into the central SQLite database."
 requires-python = ">=3.11"
 dependencies = [
     "polars>=1.9",
     "fastexcel>=0.12",
     "pyarrow>=15",
     "SQLAlchemy>=2.0",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]

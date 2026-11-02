@@ -153,7 +153,9 @@ def test_silver_versions_changed_requests(sample, tmp_path):
     assert not (db.parent / "grid_con.new.db").exists()   # Arbeitskopie aufgeräumt
 
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert tables == {"C4CExports", "BusinessTransactions", "GridConnectionRequests", "GridConnectionCustomers"}
+    assert tables == {
+        "C4CExports", "GronosExports", "BusinessTransactions", "GridConnectionRequests", "GridConnectionCustomers"
+    }
 
     for table in tables:                                   # Primärschlüssel sind UUIDs
         for (pk,) in con.execute(f"SELECT ID FROM {table}"):
