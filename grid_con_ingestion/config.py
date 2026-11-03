@@ -36,6 +36,10 @@ GRONOS_API_CLIENT_SECRET = os.environ.get("GRONOS_API_CLIENT_SECRET", "")
 # companyId-Präfixe für den Listenabruf ("*" allein läuft in einen Gateway-Timeout);
 # Bereiche und Einzelwerte, kommagetrennt. Zu breite Präfixe werden automatisch geteilt.
 GRONOS_COMPANY_ID_PREFIXES = os.environ.get("GRONOS_COMPANY_ID_PREFIXES", "1000-1299")
+# Detail call per request: "always" (dev: the list lacks contacts and stages),
+# "auto" (only when the list record has no "contacts"; ACC lists are complete),
+# "never" (store the list record as is).
+GRONOS_DETAIL_MODE = os.environ.get("GRONOS_DETAIL_MODE", "auto").strip().lower()
 GRONOS_MAX_PREFIX_LENGTH = int(os.environ.get("GRONOS_MAX_PREFIX_LENGTH", "7"))
 GRONOS_API_TIMEOUT = float(os.environ.get("GRONOS_API_TIMEOUT", "150"))
 # Vom Pod aus ist die API ohne Proxy erreichbar (getestet 27.10.2026)

@@ -69,6 +69,7 @@ gronos_raw_to_bronze     (Schedule, Standard alle 30 min)
 | `GRONOS_API_BASE_URL` | – | API-Management-Host des Tenants |
 | `GRONOS_API_CLIENT_ID` / `GRONOS_API_CLIENT_SECRET` | – | aus einem OpenShift-Secret |
 | `GRONOS_COMPANY_ID_PREFIXES` | `1000-1299` | Bereiche/Einzelwerte, kommagetrennt |
+| `GRONOS_DETAIL_MODE` | `auto` | `auto`: Detail-Aufruf nur, wenn der Listeneintrag keine `contacts` hat (ACC: Liste vollständig; dev: Liste ohne `contacts`, also Detail). `always` / `never` erzwingen es. |
 | `GRONOS_MAX_PREFIX_LENGTH` | `7` | |
 | `GRONOS_API_TIMEOUT` | `150` | Sekunden je Aufruf |
 | `GRONOS_API_USE_ENV_PROXY` | `false` | API ist vom Pod ohne Proxy erreichbar |

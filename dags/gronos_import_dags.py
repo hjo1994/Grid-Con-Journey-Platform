@@ -58,6 +58,7 @@ with DAG(
         task_id="raw_to_bronze",
         db_path=str(config.DB_PATH),
         prefixes=config.GRONOS_COMPANY_ID_PREFIXES,
+        detail_mode=config.GRONOS_DETAIL_MODE,
         retries=1,
         retry_delay=datetime.timedelta(minutes=5),
     )

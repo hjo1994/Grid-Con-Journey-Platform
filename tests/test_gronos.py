@@ -268,3 +268,21 @@ def test_detail_failures_in_a_row_abort(tmp_path):
     api = FakeApi(data, missing={r["objectId"]: {"1028399*", "1028*"} for r in data})
     with pytest.raises(GronosApiError, match="in a row"):
         raw_to_bronze(client(api), tmp_path / "grid_con.db", ["1028"])
+
+
+def test_detail_mode_auto_uses_complete_list_records(tmp_path):
+    db = tmp_path / "grid_con.db"
+    full = request_record("A")                                        # list record with contacts (ACC)
+    bare = {k: v for k, v in request_record("B").items() if k not in ("contacts", "expansionStageConnections")}
+    api = FakeApi([full, bare], details={"B": request_record("B")})
+
+    stats = raw_to_bronze(client(api), db, ["1028"], detail_mode="auto")
+    assert (stats.from_list, stats.rows_inserted) == (1, 2)
+    assert [c["id"] for c in api.calls if "id" in c] == ["B"]          # detail only for the bare record
+    stored = {json.loads(c)["objectId"]: json.loads(c) for (c,) in rows(db, "SELECT Content FROM GronosExports")}
+    assert "contacts" in stored["A"] and "contacts" in stored["B"]
+
+
+def test_detail_mode_rejects_unknown_value(tmp_path):
+    with pytest.raises(ValueError):
+        raw_to_bronze(client(FakeApi([])), tmp_path / "grid_con.db", ["1028"], detail_mode="sometimes")

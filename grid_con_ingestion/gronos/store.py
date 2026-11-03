@@ -59,6 +59,7 @@ class BronzeStats:
     new: int = 0
     updated: int = 0
     unchanged: int = 0
+    from_list: int = 0
     detail_failed: int = 0
     rows_inserted: int = 0
     timestamp: str | None = None
@@ -147,9 +148,25 @@ def write_bronze(db_path: str | Path, details: list[dict]) -> tuple[int, str | N
 
 
 MAX_CONSECUTIVE_DETAIL_FAILURES = 5
+DETAIL_MODES = ("always", "auto", "never")
 
 
-def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]) -> BronzeStats:
+def needs_detail(rec: dict, mode: str) -> bool:
+    """always: detail call per request (dev: the list has no contacts/stages).
+    auto: only if the list record lacks ``contacts`` (ACC: the list is complete).
+    never: store the list record."""
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    return "contacts" not in rec
+
+
+def raw_to_bronze(
+    client: GronosClient, db_path: str | Path, prefixes: list[str], detail_mode: str = "always"
+) -> BronzeStats:
+    if detail_mode not in DETAIL_MODES:
+        raise ValueError(f"Unknown GRONOS_DETAIL_MODE {detail_mode!r}, expected one of {DETAIL_MODES}")
     stats = BronzeStats()
     log.info("RawToBronze: %d prefixes (%s ... %s), DB %s", len(prefixes), prefixes[0] if prefixes else "-",
              prefixes[-1] if prefixes else "-", db_path)
@@ -161,15 +178,19 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
     known = current_states(db_path)
     log.info("Bronze already holds %d objectIds", len(known))
     changed = select_changed(listing.records, known, stats)
+    to_fetch = [rec for rec in changed if needs_detail(rec, detail_mode)]
+    details = [rec for rec in changed if not needs_detail(rec, detail_mode)]
+    stats.from_list = len(details)
     log.info(
-        "List done: %d requests (%d calls) - %d new, %d updated, %d unchanged; fetching %d details",
-        stats.listed, stats.list_calls, stats.new, stats.updated, stats.unchanged, len(changed),
+        "List done: %d requests (%d calls) - %d new, %d updated, %d unchanged; "
+        "detail mode %s: %d taken from the list, fetching %d details",
+        stats.listed, stats.list_calls, stats.new, stats.updated, stats.unchanged,
+        detail_mode, len(details), len(to_fetch),
     )
 
-    details = []
     detail_start = time.monotonic()
     consecutive_failures = 0
-    for i, rec in enumerate(changed, start=1):
+    for i, rec in enumerate(to_fetch, start=1):
         started = time.monotonic()
         try:
             detail = client.detail(rec["objectId"], rec.get("companyId"))
@@ -179,7 +200,7 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
             # general problem (auth, gateway) -> fail the task.
             stats.detail_failed += 1
             consecutive_failures += 1
-            log.warning("Detail %d/%d skipped, retried next run: %s", i, len(changed), exc)
+            log.warning("Detail %d/%d skipped, retried next run: %s", i, len(to_fetch), exc)
             if consecutive_failures >= MAX_CONSECUTIVE_DETAIL_FAILURES:
                 raise GronosApiError(
                     f"{consecutive_failures} detail calls in a row failed, aborting (last: {exc})"
@@ -187,10 +208,10 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
             continue
         consecutive_failures = 0
         elapsed = time.monotonic() - detail_start
-        remaining = elapsed / i * (len(changed) - i)
+        remaining = elapsed / i * (len(to_fetch) - i)
         log.info(
             "Detail %d/%d objectId %s: %.1f s (elapsed %.0f s, approx. %.0f min left)",
-            i, len(changed), rec["objectId"], time.monotonic() - started, elapsed, remaining / 60,
+            i, len(to_fetch), rec["objectId"], time.monotonic() - started, elapsed, remaining / 60,
         )
         # Same state as in Bronze already (e.g. list was newer than detail)? skip
         if rec["objectId"] in known and not is_newer(detail.get("updatedAt"), known[rec["objectId"]]):
@@ -199,7 +220,7 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
         details.append(detail)
 
     if stats.detail_failed:
-        log.warning("%d of %d detail calls failed and were skipped", stats.detail_failed, len(changed))
+        log.warning("%d of %d detail calls failed and were skipped", stats.detail_failed, len(to_fetch))
     log.info("Writing %d rows to GronosExports ...", len(details))
     stats.rows_inserted, stats.timestamp = write_bronze(db_path, details)
     return stats

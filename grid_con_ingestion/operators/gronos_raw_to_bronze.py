@@ -12,15 +12,16 @@ from grid_con_ingestion.gronos.store import raw_to_bronze
 
 
 class GronosRawToBronzeOperator(BaseOperator):
-    template_fields = ("db_path", "prefixes")
+    template_fields = ("db_path", "prefixes", "detail_mode")
 
-    def __init__(self, *, db_path: str, prefixes: str, **kwargs):
+    def __init__(self, *, db_path: str, prefixes: str, detail_mode: str = "auto", **kwargs):
         super().__init__(**kwargs)
         self.db_path = db_path
         self.prefixes = prefixes
+        self.detail_mode = detail_mode
 
     def execute(self, context) -> dict:
-        stats = raw_to_bronze(config.gronos_client(), self.db_path, parse_prefixes(self.prefixes))
+        stats = raw_to_bronze(config.gronos_client(), self.db_path, parse_prefixes(self.prefixes), self.detail_mode)
         self.log.info(
             "%d requests listed (%d calls, %d duplicates): %d new, %d updated, %d unchanged",
             stats.listed, stats.list_calls, stats.duplicates, stats.new, stats.updated, stats.unchanged,
