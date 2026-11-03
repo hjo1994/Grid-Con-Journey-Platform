@@ -17,6 +17,12 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
 - **Detailbereich** nur mit Silver-Feldern: Prozessfortschritt, Dokumente und
   Links (ELO-Referenz, C4C-Ticket), Netzanschluss, Ansprechpartner,
   Kommentar, Stand.
+  Für Anfragen aus der GRONOS-API (`gronos_object_id` gesetzt) zusätzlich:
+  Dokument-Dateinamen, „Verfahren in GRONOS“ (Projektphase, nächster Akteur,
+  VNB kontaktiert, VNB-Rückmeldung, als Code bis die Code-Listen da sind),
+  Inbetriebnahme, Koordinaten (Link auf OpenStreetMap, erst beim Klick),
+  Firmen-ID und USt-IdNr. des Kunden, „Geändert in GRONOS“ und die
+  GRONOS-ID. Bei Anfragen aus dem Excel-Import bleiben diese Zeilen weg.
 - **Widgets**: *Status der Anfragen* nach Phase
   (`/aggregate?group_by=request_status`) und *Aktive Leistung nach
   Technologie* (`/aggregate?group_by=generation_technology&exclude_status=Eingestellt&split_multi=true`;

@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import App from "./App";
-import { BY_STATUS, BY_TECH, CUSTOMERS, PAGE, STATUSES } from "./test/fixtures";
+import { BY_STATUS, BY_TECH, CUSTOMERS, GRONOS_PAGE, PAGE, STATUSES } from "./test/fixtures";
 
 type Responder = (url: URL) => { status: number; body?: unknown };
 
@@ -69,6 +69,33 @@ describe("App", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "MW" }));
     await waitFor(() => expect(fetch.mock.calls.some(([u]) => /sort=max_p&order=desc/.test(String(u)))).toBe(true));
+  });
+
+  it("shows the GRONOS API columns for API requests", async () => {
+    mockFetch((url) => (url.pathname.endsWith("/grid-connection-requests") ? { status: 200, body: GRONOS_PAGE } : ok(url)));
+    render(<App />);
+    const detail = await screen.findByRole("complementary", { name: "Details zur Anfrage" });
+    await within(detail).findByText("Verfahren in GRONOS");
+    expect(within(detail).getByText("Z01")).toBeInTheDocument();
+    expect(within(detail).getByText("Ja")).toBeInTheDocument();
+    expect(within(detail).getByText("01.01.2027")).toBeInTheDocument();
+    expect(within(detail).getByRole("link", { name: /54,0594° N, 12,3322° O/ })).toHaveAttribute(
+      "href",
+      expect.stringContaining("openstreetmap.org/?mlat=54.0594&mlon=12.3322"),
+    );
+    expect(within(detail).getByRole("list", { name: "Dokumente in GRONOS" })).toHaveTextContent("lageplan.pdfvollmacht.pdf");
+    expect(within(detail).getByText("1000001")).toBeInTheDocument();
+    expect(within(detail).getByText("DE000000000")).toBeInTheDocument();
+    expect(within(detail).getByText("ABCDEF0123456789ABCDEF0123456789")).toBeInTheDocument();
+  });
+
+  it("hides the GRONOS rows for requests from the Excel import", async () => {
+    mockFetch(ok);
+    render(<App />);
+    const detail = await screen.findByRole("complementary", { name: "Details zur Anfrage" });
+    await within(detail).findByText("Person-A");
+    expect(within(detail).queryByText("Verfahren in GRONOS")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("Inbetriebnahme")).not.toBeInTheDocument();
   });
 
   it("names the problem when the database is unavailable", async () => {

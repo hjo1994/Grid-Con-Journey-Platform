@@ -82,6 +82,16 @@ def test_list_returns_newest_entry_per_ticket_with_silver_fields(client):
         "document_url": None,
         "request_comment": None,
         "timestamp": "2026-10-02T08:00:00Z",
+        # GRONOS API columns, empty for Excel-import rows
+        "gronos_object_id": None,
+        "next_actor": None,
+        "project_phase": None,
+        "dso_contacted": None,
+        "dso_response": None,
+        "commissioning_date": None,
+        "latitude": None,
+        "longitude": None,
+        "source_updated_at": None,
     }
 
 
@@ -157,6 +167,8 @@ def test_detail_returns_current_state_and_optional_customer(client):
         "customer_name": "Solar 100% GmbH",
         "customer_contact_person": "Anna",
         "customer_contact_person_email": "a@example.invalid",
+        "company_id": None,
+        "vat_number": None,
     }
     assert client.get(f"{BASE}/999").status_code == 404
     assert client.get(f"{BASE}/100?expand=owner").status_code == 422
@@ -285,3 +297,27 @@ def test_session_can_be_used_from_another_thread(db_path):
         assert count == 5
     finally:
         session.close()
+
+
+def test_gronos_api_columns_are_serialized(db_path):
+    con = sqlite3.connect(db_path)
+    con.execute(
+        "UPDATE GridConnectionRequests SET GronosObjectID = 'ABC', NextActor = '2', ProjectPhase = 'Z01', "
+        "DsoContacted = 1, DsoResponse = '0', CommissioningDate = '2027-01-01 00:00:00.000000', "
+        "Latitude = 54.06, Longitude = 12.33, SourceUpdatedAt = '2026-07-24 06:33:36.356000' WHERE ID = 'r102'"
+    )
+    con.execute(
+        "UPDATE GridConnectionCustomers SET CompanyID = '1000001', VatNumber = 'DE000000000' WHERE ID = ?",
+        (CUSTOMER_B,),
+    )
+    con.commit()
+    con.close()
+
+    body = TestClient(get_app(db_path)).get(f"{BASE}/102?expand=customer").json()
+    assert {k: body[k] for k in ("gronos_object_id", "next_actor", "project_phase", "dso_contacted", "dso_response")} == {
+        "gronos_object_id": "ABC", "next_actor": "2", "project_phase": "Z01", "dso_contacted": True, "dso_response": "0",
+    }
+    assert body["commissioning_date"] == "2027-01-01T00:00:00Z"
+    assert body["source_updated_at"] == "2026-07-24T06:33:36.356000Z"
+    assert (body["latitude"], body["longitude"]) == (54.06, 12.33)
+    assert (body["customer"]["company_id"], body["customer"]["vat_number"]) == ("1000001", "DE000000000")

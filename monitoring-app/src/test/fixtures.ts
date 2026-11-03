@@ -15,6 +15,10 @@ export const STATUSES: RequestStatus[] = [
 export const CUSTOMERS: Customer[] = [
   { id: "c1", customer_name: "Unternehmen-A", customer_contact_person: "Person-A", customer_contact_person_email: "a@example.invalid" },
   { id: "c2", customer_name: "Unternehmen-B", customer_contact_person: null, customer_contact_person_email: null },
+  {
+    id: "c3", customer_name: "Unternehmen-C", customer_contact_person: "Person-C", customer_contact_person_email: "c@example.invalid",
+    company_id: "1000001", vat_number: "DE000000000",
+  },
 ];
 
 export const req = (over: Partial<GridConnectionRequest>): GridConnectionRequest => ({
@@ -44,6 +48,22 @@ export const PAGE: RequestPage = {
   limit: 20,
   offset: 0,
   data_as_of: "2026-10-13T14:54:38Z",
+};
+
+// A request from the GRONOS API (codes instead of plain-text status)
+export const GRONOS_PAGE: RequestPage = {
+  ...PAGE,
+  items: [
+    req({
+      id: "g1", id_gronos_new: 4902, id_gronos_old: "Projekt-G1", customer_id: "c3", request_status: "4",
+      generation_technology: "BESS", max_p: 170, substation_50hertz: null, substation_location: "Teststraße 1, 12345 Testort",
+      switch_count: null, document_url: "lageplan.pdf | vollmacht.pdf",
+      gronos_object_id: "ABCDEF0123456789ABCDEF0123456789", next_actor: "2", project_phase: "Z01",
+      dso_contacted: true, dso_response: "0", commissioning_date: "2027-01-01T00:00:00Z",
+      latitude: 54.0594, longitude: 12.3322, source_updated_at: "2026-07-24T06:33:36Z",
+    }),
+  ],
+  total: 1,
 };
 
 export const BY_STATUS: AggregateResult = {

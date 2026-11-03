@@ -9,7 +9,7 @@ therefore not copied; BusinessTransactions only as FK target.
 """
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -19,16 +19,21 @@ class BusinessTransaction(Base):
     __tablename__ = "BusinessTransactions"
 
     ID = Column(String(36), primary_key=True)  # UUID
-    C4CExportID = Column(String(36), nullable=False, unique=True)
+    C4CExportID = Column(String(36), nullable=True, unique=True)  # Excel import
+    GronosExportID = Column(String(36), nullable=True, unique=True)  # GRONOS API import
+    TimestampImportBronze = Column(DateTime, nullable=True)
+    TimestampImportSilver = Column(DateTime, nullable=True)
 
 
 class GridConnectionCustomer(Base):
     __tablename__ = "GridConnectionCustomers"
 
     ID = Column(String(36), primary_key=True)  # UUID
+    CompanyID = Column(String, nullable=True)  # GRONOS companyId
     CustomerName = Column(String, nullable=True)
     CustomerContactPerson = Column(String, nullable=True)
     CustomerContactPersonEmail = Column(String, nullable=True)
+    VatNumber = Column(String, nullable=True)
 
     requests = relationship("GridConnectionRequest", back_populates="customer")
 
@@ -49,9 +54,19 @@ class GridConnectionRequest(Base):
     maxP = Column(Float, nullable=True)  # MW
     SwitchCount = Column(Integer, nullable=True)
     DocumentURL = Column(String, nullable=True)
-    id_gronos_old = Column(String, nullable=True)  # C4C "Ticket" (Projekt-xxxx)
-    id_gronos_new = Column(Integer, nullable=True)  # C4C "Ticket ID"
+    id_gronos_old = Column(String, nullable=True)  # C4C "Ticket" (Projekt-xxxx) / API projectName
+    id_gronos_new = Column(Integer, nullable=True)  # C4C "Ticket ID" / API friendlyId
     RequestComment = Column(String, nullable=True)
-    timestamp = Column(DateTime, nullable=True)  # UTC
+    timestamp = Column(DateTime, nullable=True)  # time of the Silver import, UTC
+    # --- GRONOS API only
+    GronosObjectID = Column(String(32), nullable=True)
+    NextActor = Column(String, nullable=True)
+    ProjectPhase = Column(String, nullable=True)
+    DsoContacted = Column(Boolean, nullable=True)
+    DsoResponse = Column(String, nullable=True)
+    CommissioningDate = Column(DateTime, nullable=True)
+    Latitude = Column(Float, nullable=True)
+    Longitude = Column(Float, nullable=True)
+    SourceUpdatedAt = Column(DateTime, nullable=True)
 
     customer = relationship("GridConnectionCustomer", back_populates="requests")

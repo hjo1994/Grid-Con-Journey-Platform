@@ -5,6 +5,9 @@ export interface Customer {
   customer_name: string | null;
   customer_contact_person: string | null;
   customer_contact_person_email: string | null;
+  /** GRONOS companyId; null for customers from the Excel import */
+  company_id?: string | null;
+  vat_number?: string | null;
 }
 
 export interface GridConnectionRequest {
@@ -22,7 +25,21 @@ export interface GridConnectionRequest {
   switch_count: number | null;
   document_url: string | null;
   request_comment: string | null;
+  /** Time of the import into Silver (UTC) */
   timestamp: string | null;
+  // --- GRONOS API only; null for requests from the Excel import
+  gronos_object_id?: string | null;
+  /** Codes until the GRONOS code lists are available */
+  next_actor?: string | null;
+  project_phase?: string | null;
+  dso_contacted?: boolean | null;
+  dso_response?: string | null;
+  /** Earliest start date of the expansion stages (UTC) */
+  commissioning_date?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Last change in GRONOS (UTC) */
+  source_updated_at?: string | null;
 }
 
 export interface GridConnectionRequestWithCustomer extends GridConnectionRequest {
