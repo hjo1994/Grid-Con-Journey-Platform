@@ -8,7 +8,8 @@ deployments/images); keep both in sync with the diagram, never the other way
 round.
 
 Layer (siehe `solution documentation/Architecture.drawio`):
-  * Bronce: C4CExports – Export as is, plus Metadaten je Lieferung
+  * Bronce: GronosExports – Antwort der GRONOS-API as is (JSON) je Abruf
+            C4CExports – Excel-Export as is (Übergang, bis der Excel-Import entfällt)
   * Silver: BusinessTransactions, GridConnectionRequests, GridConnectionCustomers
 
 Gold (RequestDocument, RequestEvaluationChecks, Evaluation*) ist vorerst
@@ -21,7 +22,7 @@ Nicht-Schlüsselspalten nullable).
 """
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Table, text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Table, Text, text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -86,13 +87,38 @@ class C4CExport(Base):
     )
 
 
+class GronosExport(Base):
+    """Bronce: eine Zeile je abgerufener Netzanschlussanfrage der GRONOS-API.
+
+    Content = Antwort des Detail-Endpunkts as is (JSON-Text), Timestamp =
+    Zeitpunkt des API-Abrufs (UTC, gleich für alle Zeilen eines Abrufs).
+    Append-only: ein neuer Stand einer Anfrage (``updatedAt``) ist eine neue
+    Zeile. Die Umwandlung nach Silver passiert erst in BronzeToSilver.
+    """
+
+    __tablename__ = "GronosExports"
+
+    ID = Column(String(36), primary_key=True)  # UUID
+    Timestamp = Column(DateTime, nullable=False, index=True)
+    Content = Column(Text, nullable=False)
+
+
 class BusinessTransaction(Base):
-    """Silver: ein Vorgang je verarbeiteter Bronce-Zeile (1:1 zu C4CExports)."""
+    """Silver: ein Vorgang je verarbeiteter Bronce-Zeile.
+
+    Excel-Import: 1:1 zu C4CExports. GRONOS-API: 1:1 zu GronosExports, mit
+    TimestampImportBronze (= GronosExports.Timestamp, Wasserstand für den
+    nächsten BronzeToSilver-Lauf) und TimestampImportSilver (Zeitpunkt des
+    Schreibens nach Silver, UTC).
+    """
 
     __tablename__ = "BusinessTransactions"
 
     ID = Column(String(36), primary_key=True)  # UUID
-    C4CExportID = Column(String(36), ForeignKey("C4CExports.ID"), nullable=False, unique=True)
+    C4CExportID = Column(String(36), ForeignKey("C4CExports.ID"), nullable=True, unique=True)
+    GronosExportID = Column(String(36), ForeignKey("GronosExports.ID"), nullable=True, unique=True)
+    TimestampImportBronze = Column(DateTime, nullable=True, index=True)
+    TimestampImportSilver = Column(DateTime, nullable=True)
 
     request = relationship("GridConnectionRequest", back_populates="business_transaction", uselist=False)
 
@@ -101,11 +127,22 @@ class GridConnectionCustomer(Base):
     __tablename__ = "GridConnectionCustomers"
 
     ID = Column(String(36), primary_key=True)  # UUID
+    CompanyID = Column(String, nullable=True)  # GRONOS companyId, Schlüssel für den API-Import
     CustomerName = Column(String, nullable=True)
     CustomerContactPerson = Column(String, nullable=True)
     CustomerContactPersonEmail = Column(String, nullable=True)
+    VatNumber = Column(String, nullable=True)  # USt-IdNr. (companyInfo.vatNumber)
 
     requests = relationship("GridConnectionRequest", back_populates="customer")
+
+    __table_args__ = (
+        Index(
+            "ux_gcc_company_id",
+            "CompanyID",
+            unique=True,
+            sqlite_where=text("CompanyID IS NOT NULL"),
+        ),
+    )
 
 
 class GridConnectionRequest(Base):
@@ -126,10 +163,20 @@ class GridConnectionRequest(Base):
     maxP = Column(Float, nullable=True)  # MW
     SwitchCount = Column(Integer, nullable=True)
     DocumentURL = Column(String, nullable=True)
-    id_gronos_old = Column(String, nullable=True)  # C4C "Ticket" (Projekt-xxxx)
-    id_gronos_new = Column(Integer, nullable=True)  # C4C "Ticket ID"
+    id_gronos_old = Column(String, nullable=True)  # C4C "Ticket" (Projekt-xxxx) / API projectName
+    id_gronos_new = Column(Integer, nullable=True)  # C4C "Ticket ID" / API friendlyId
     RequestComment = Column(String, nullable=True)
-    timestamp = Column(DateTime, nullable=True)  # letzte Änderung durch BronceToSilver (UTC)
+    timestamp = Column(DateTime, nullable=True)  # Zeitpunkt des Imports nach Silver (UTC)
+    # --- nur aus der GRONOS-API
+    GronosObjectID = Column(String(32), nullable=True)  # objectId, Schlüssel je Anfrage
+    NextActor = Column(String, nullable=True)  # Code
+    ProjectPhase = Column(String, nullable=True)  # Code
+    DsoContacted = Column(Boolean, nullable=True)
+    DsoResponse = Column(String, nullable=True)  # Code
+    CommissioningDate = Column(DateTime, nullable=True)  # frühestes startDate der Ausbaustufen
+    Latitude = Column(Float, nullable=True)
+    Longitude = Column(Float, nullable=True)
+    SourceUpdatedAt = Column(DateTime, nullable=True)  # updatedAt in GRONOS
 
     customer = relationship("GridConnectionCustomer", back_populates="requests")
     business_transaction = relationship("BusinessTransaction", back_populates="request")
@@ -138,6 +185,7 @@ class GridConnectionRequest(Base):
         Index("ix_gcr_customer", "CustomerID"),
         Index("ix_gcr_id_gronos_old", "id_gronos_old"),
         Index("ix_gcr_id_gronos_new", "id_gronos_new"),  # mehrere Stände je Ticket
+        Index("ix_gcr_gronos_object_id", "GronosObjectID"),  # mehrere Stände je Anfrage
         Index(
             "ux_gcr_business_transaction",
             "BusinessTransactionID",

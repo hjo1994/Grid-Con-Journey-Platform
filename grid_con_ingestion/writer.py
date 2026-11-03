@@ -37,6 +37,7 @@ Schlüssel
 """
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import sqlite3
@@ -91,7 +92,8 @@ def _new_id() -> str:
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ")
+    # feste Länge (immer mit Mikrosekunden), damit Textvergleiche = Zeitvergleiche sind
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds")
 
 
 def _quote(name: str) -> str:
@@ -130,10 +132,33 @@ def ensure_schema(db_path: str | Path) -> None:
 
 
 @contextmanager
+def _writer_lock(db_path: Path) -> Iterator[None]:
+    """Exklusive Sperre je Datenbank (Datei ``<db>.lock``).
+
+    RawToBronze und BronzeToSilver sind getrennte DAGs; ohne Sperre könnte
+    ein Lauf den Tausch des anderen überschreiben (beide arbeiten auf einer
+    Kopie). Wartet, bis der andere Schreiber fertig ist.
+    """
+    with open(db_path.with_name(db_path.name + ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+@contextmanager
 def atomic_write(db_path: str | Path) -> Iterator[sqlite3.Connection]:
-    """Arbeitskopie → Schema → Transaktion → FK-Prüfung → atomarer Tausch."""
+    """Sperre → Arbeitskopie → Schema → Transaktion → FK-Prüfung → atomarer Tausch."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    with _writer_lock(db_path):
+        with _atomic_write_unlocked(db_path) as conn:
+            yield conn
+
+
+@contextmanager
+def _atomic_write_unlocked(db_path: Path) -> Iterator[sqlite3.Connection]:
     tmp_path = db_path.with_name(db_path.stem + ".new" + db_path.suffix)
     tmp_path.unlink(missing_ok=True)
 

@@ -37,6 +37,53 @@ RequestEvaluationChecks, Evaluation*) ist vorerst nicht umgesetzt.
 
 **Kunden-Stammdaten:** siehe „Lokal ausführen“.
 
+## GRONOS-API (`dags/gronos_import_dags.py`)
+
+Zwei DAGs, Datenmodell siehe `solution documentation/LogicalDataModel.drawio`
+(PROPOSAL v3, lokal gepflegt):
+
+```
+gronos_raw_to_bronze     (Schedule, Standard alle 30 min)
+  raw_to_bronze  -->  trigger_bronze_to_silver  --> gronos_bronze_to_silver
+                      (wartet auf das Ende)            bronze_to_silver
+```
+
+1. **`raw_to_bronze`** (`grid_con_ingestion/gronos/store.py`) – OAuth-Token
+   (Client Credentials), Liste je `companyId`-Präfix (`ConnectionRequest?companyId=<Präfix>*`,
+   bei 502/503/504 automatisch in zehn Unterpräfixe geteilt, bis 7 Stellen),
+   Duplikate über `objectId` entfernt. Nur neue objectIds und solche mit
+   neuerem `updatedAt` als in Bronze werden per Detail-Endpunkt
+   (`?id=<objectId>&companyId=<eigene companyId>*`, ca. 4 s je Aufruf) geholt
+   und als eine Zeile je Anfrage an **`GronosExports`** angehängt (`ID`,
+   `Timestamp` des Abrufs, `Content` = JSON as is). API-Fehler: Task schlägt
+   fehl, nichts wird geschrieben.
+2. **`bronze_to_silver`** – nach jedem erfolgreichen RawToBronze-Lauf. Liest
+   alle `GronosExports` mit `Timestamp` > `MAX(BusinessTransactions.TimestampImportBronze)`,
+   wandelt `Content` um (`gronos/transform.py`), Kunden über `CompanyID`,
+   je Bronze-Zeile eine `BusinessTransactions`-Zeile (`TimestampImportBronze`,
+   `TimestampImportSilver`); neuer Eintrag in `GridConnectionRequests` nur bei
+   geänderten Werten.
+
+| Variable | Standard | |
+|---|---|---|
+| `GRONOS_API_BASE_URL` | – | API-Management-Host des Tenants |
+| `GRONOS_API_CLIENT_ID` / `GRONOS_API_CLIENT_SECRET` | – | aus einem OpenShift-Secret |
+| `GRONOS_COMPANY_ID_PREFIXES` | `1000-1299` | Bereiche/Einzelwerte, kommagetrennt |
+| `GRONOS_MAX_PREFIX_LENGTH` | `7` | |
+| `GRONOS_API_TIMEOUT` | `150` | Sekunden je Aufruf |
+| `GRONOS_API_USE_ENV_PROXY` | `false` | API ist vom Pod ohne Proxy erreichbar |
+| `GRONOS_RAW_TO_BRONZE_SCHEDULE` | `*/30 * * * *` | |
+
+`requests` kommt mit Airflow 2.10 mit (keine Änderung an `pyproject.toml`/`poetry.lock`).
+Beide DAGs schreiben über `writer.atomic_write` mit Dateisperre (`grid_con.db.lock`).
+
+**Bestehende Datenbank:** `BusinessTransactions.C4CExportID` war `NOT NULL`;
+SQLite kann das nicht nachträglich ändern. Vor dem ersten GRONOS-Lauf die
+Datenbank neu aufbauen (vorher Dump) und den Excel-DAG
+`grid_connection_requests_import` pausieren.
+
+Demo-Daten ohne API: `python scripts/seed_demo_gronos.py data/db/grid_con_demo.db`.
+
 ## Anpassungen an die Plattform (gegenüber `main`)
 
 | Thema | `main` | dieser Branch |

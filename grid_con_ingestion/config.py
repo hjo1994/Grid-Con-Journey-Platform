@@ -23,3 +23,34 @@ def source_kwargs() -> dict:
     if SOURCE_TYPE == "api":
         return {"base_url": API_BASE_URL, "conn_id": API_CONN_ID, "staging_dir": str(SOURCE_DIR)}
     raise ValueError(f"Unbekannter GRID_CON_SOURCE_TYPE: {SOURCE_TYPE}")
+
+
+# --------------------------------------------------------------------------- #
+# GRONOS-API (SAP API Management), DAGs gronos_raw_to_bronze / gronos_bronze_to_silver
+# --------------------------------------------------------------------------- #
+# Basis-URL des Tenants, z. B. https://eliagroup-111-dev.test.apimanagement.eu10.hana.ondemand.com
+GRONOS_API_BASE_URL = os.environ.get("GRONOS_API_BASE_URL", "")
+# Client-Credentials aus einem OpenShift-Secret (nie im Repo / in Helm-Values im Klartext)
+GRONOS_API_CLIENT_ID = os.environ.get("GRONOS_API_CLIENT_ID", "")
+GRONOS_API_CLIENT_SECRET = os.environ.get("GRONOS_API_CLIENT_SECRET", "")
+# companyId-Präfixe für den Listenabruf ("*" allein läuft in einen Gateway-Timeout);
+# Bereiche und Einzelwerte, kommagetrennt. Zu breite Präfixe werden automatisch geteilt.
+GRONOS_COMPANY_ID_PREFIXES = os.environ.get("GRONOS_COMPANY_ID_PREFIXES", "1000-1299")
+GRONOS_MAX_PREFIX_LENGTH = int(os.environ.get("GRONOS_MAX_PREFIX_LENGTH", "7"))
+GRONOS_API_TIMEOUT = float(os.environ.get("GRONOS_API_TIMEOUT", "150"))
+# Vom Pod aus ist die API ohne Proxy erreichbar (getestet 27.10.2026)
+GRONOS_API_USE_ENV_PROXY = os.environ.get("GRONOS_API_USE_ENV_PROXY", "false").lower() == "true"
+GRONOS_RAW_TO_BRONZE_SCHEDULE = os.environ.get("GRONOS_RAW_TO_BRONZE_SCHEDULE", "*/30 * * * *")
+
+
+def gronos_client():
+    from grid_con_ingestion.gronos.client import GronosClient
+
+    return GronosClient(
+        GRONOS_API_BASE_URL,
+        GRONOS_API_CLIENT_ID,
+        GRONOS_API_CLIENT_SECRET,
+        timeout=GRONOS_API_TIMEOUT,
+        max_prefix_length=GRONOS_MAX_PREFIX_LENGTH,
+        use_env_proxy=GRONOS_API_USE_ENV_PROXY,
+    )
