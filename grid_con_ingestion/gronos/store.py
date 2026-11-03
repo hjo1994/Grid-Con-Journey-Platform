@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -44,7 +45,9 @@ from grid_con_ingestion.gronos.transform import (
 )
 from grid_con_ingestion.writer import _new_id, _utcnow, atomic_write
 
-log = logging.getLogger(__name__)
+# Child of "airflow.task": the lines land in the Airflow task log in every
+# executor/logging setup; outside Airflow it is a normal logger.
+log = logging.getLogger("airflow.task.gronos.store")
 
 
 @dataclass
@@ -143,12 +146,15 @@ def write_bronze(db_path: str | Path, details: list[dict]) -> tuple[int, str | N
 
 def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]) -> BronzeStats:
     stats = BronzeStats()
+    log.info("RawToBronze: %d Präfixe (%s … %s), DB %s", len(prefixes), prefixes[0] if prefixes else "-",
+             prefixes[-1] if prefixes else "-", db_path)
     listing = client.list_all(prefixes)
     stats.listed, stats.list_calls, stats.duplicates = len(listing.records), listing.calls, listing.duplicates
     if listing.split_prefixes:
         log.info("Aufgeteilte Präfixe (Gateway-Timeout): %s", listing.split_prefixes)
 
     known = current_states(db_path)
+    log.info("Bronze kennt bereits %d objectIds", len(known))
     changed = select_changed(listing.records, known, stats)
     log.info(
         "Liste fertig: %d Anfragen (%d Aufrufe) – %d neu, %d geändert, %d unverändert; hole %d Details",
@@ -156,16 +162,23 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
     )
 
     details = []
+    detail_start = time.monotonic()
     for i, rec in enumerate(changed, start=1):
-        if i == 1 or i % 10 == 0 or i == len(changed):
-            log.info("Detail %d/%d (objectId %s)", i, len(changed), rec["objectId"])
+        started = time.monotonic()
         detail = client.detail(rec["objectId"], rec.get("companyId"))
+        elapsed = time.monotonic() - detail_start
+        remaining = elapsed / i * (len(changed) - i)
+        log.info(
+            "Detail %d/%d objectId %s: %.1f s (gesamt %.0f s, noch ca. %.0f min)",
+            i, len(changed), rec["objectId"], time.monotonic() - started, elapsed, remaining / 60,
+        )
         # Same state as in Bronze already (e.g. list was newer than detail)? skip
         if rec["objectId"] in known and not is_newer(detail.get("updatedAt"), known[rec["objectId"]]):
             stats.unchanged += 1
             continue
         details.append(detail)
 
+    log.info("Schreibe %d Zeilen nach GronosExports …", len(details))
     stats.rows_inserted, stats.timestamp = write_bronze(db_path, details)
     return stats
 

@@ -17,12 +17,15 @@ proxy, so environment proxies are ignored unless ``use_env_proxy`` is set.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 import requests
 
-log = logging.getLogger(__name__)
+# Child of "airflow.task": the lines land in the Airflow task log in every
+# executor/logging setup; outside Airflow it is a normal logger.
+log = logging.getLogger("airflow.task.gronos.client")
 
 TOKEN_PATH = "/v1/api/OAuthService/GenerateToken"
 REQUESTS_PATH = "/http/CP1001/IF0058/ConnectionRequest"
@@ -160,6 +163,8 @@ class GronosClient:
         while pending:
             prefix = pending.pop(0)
             result.calls += 1
+            started = time.monotonic()
+            log.info("Liste companyId=%s%s … (Aufruf %d, noch %d offen)", prefix, WILDCARD, result.calls, len(pending))
             try:
                 found = self.list_prefix(prefix)
             except _GatewayTimeout as exc:
@@ -167,11 +172,11 @@ class GronosClient:
                     raise GronosApiError(
                         f"companyId={prefix}{WILDCARD} liefert weiterhin {exc} – nicht weiter teilbar"
                     ) from exc
-                log.info("companyId=%s%s: %s – teile auf", prefix, WILDCARD, exc)
+                log.info("companyId=%s%s: %s nach %.1f s – teile auf", prefix, WILDCARD, exc, time.monotonic() - started)
                 result.split_prefixes.append(prefix)
                 pending[:0] = [prefix + d for d in "0123456789"]
                 continue
-            log.info("Liste companyId=%s%s: %d Datensätze", prefix, WILDCARD, len(found))
+            log.info("Liste companyId=%s%s: %d Datensätze in %.1f s", prefix, WILDCARD, len(found), time.monotonic() - started)
             for rec in found:
                 oid = rec.get("objectId")
                 if not oid:
