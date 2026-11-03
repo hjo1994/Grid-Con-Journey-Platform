@@ -37,6 +37,10 @@ class GronosApiError(RuntimeError):
     """Any API answer we cannot use; fails the Airflow task."""
 
 
+class DetailNotFound(GronosApiError):
+    """The detail call answered, but without the requested objectId."""
+
+
 class _GatewayTimeout(Exception):
     """Prefix too broad for the gateway (502/503/504 or client timeout)."""
 
@@ -192,16 +196,35 @@ class GronosClient:
 
     # ---------------------------------------------------------------- detail
     def detail(self, object_id: str, company_id: str | None) -> dict:
-        """Detail record of one request (taken from the response unchanged)."""
-        company = (company_id or "") + WILDCARD
+        """Detail record of one request (taken from the response unchanged).
+
+        Asks with ``companyId=<companyId>*`` first. Some requests are not
+        returned that way (seen on dev, 03.11.2026), so a miss is retried
+        once with the 4-digit prefix of the company id.
+        """
+        company_id = company_id or ""
+        attempts = [company_id]
+        if len(company_id) > 4:
+            attempts.append(company_id[:4])
+        for i, company in enumerate(attempts):
+            match = self._detail_once(object_id, company + WILDCARD)
+            if match is not None:
+                return match
+            if i + 1 < len(attempts):
+                log.info("Detail %s: not in companyId=%s%s, retrying with companyId=%s%s",
+                         object_id, company, WILDCARD, attempts[i + 1], WILDCARD)
+        raise DetailNotFound(
+            f"Detail {object_id}: request not contained in the response "
+            f"(companyId tried: {', '.join(c + WILDCARD for c in attempts)})"
+        )
+
+    def _detail_once(self, object_id: str, company: str) -> dict | None:
         try:
             resp = self._get({"id": object_id, "companyId": company})
         except _GatewayTimeout as exc:
             raise GronosApiError(f"Detail {object_id}: {exc}") from exc
         if resp.status_code != 200:
             raise GronosApiError(f"Detail {object_id}: HTTP {resp.status_code}")
-        found = records(resp.json())
+        found = records(resp.json()) if resp.content.strip() else []
         match = [r for r in found if r.get("objectId") == object_id]
-        if not match:
-            raise GronosApiError(f"Detail {object_id}: request not contained in the response")
-        return match[0]
+        return match[0] if match else None

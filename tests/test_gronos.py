@@ -66,9 +66,10 @@ class FakeResponse:
 class FakeApi(requests.Session):
     """List by companyId prefix; prefixes shorter than ``min_len`` time out."""
 
-    def __init__(self, data, min_len=4, details=None):
+    def __init__(self, data, min_len=4, details=None, missing=None):
         super().__init__()
         self.data, self.min_len, self.details = data, min_len, details or {}
+        self.missing = missing or {}  # objectId -> companyId values answered without the record
         self.calls, self.tokens, self.expire_next = [], 0, False
 
     def post(self, url, **kw):
@@ -83,6 +84,8 @@ class FakeApi(requests.Session):
         company = params["companyId"]
         assert company.endswith("*")
         if "id" in params:
+            if company in self.missing.get(params["id"], ()):
+                return FakeResponse(200, [])
             rec = self.details.get(params["id"]) or next(r for r in self.data if r["objectId"] == params["id"])
             return FakeResponse(200, [rec])
         prefix = company[:-1]
@@ -243,3 +246,25 @@ def test_bronze_to_silver_skips_identical_state_but_moves_watermark(tmp_path):
     assert stats.business_transactions_inserted == 2
     assert bronze_to_silver(db).bronze_rows == 0
     assert rows(db, "SELECT COUNT(*) FROM GridConnectionRequests") == [(1,)]
+
+
+def test_detail_retries_with_short_prefix_and_skips_missing(tmp_path):
+    db = tmp_path / "grid_con.db"
+    data = [request_record("A"), request_record("B"), request_record("C")]
+    api = FakeApi(data, missing={"B": {"1028399*"}, "C": {"1028399*", "1028*"}})
+
+    stats = raw_to_bronze(client(api), db, ["1028"])
+    assert (stats.new, stats.detail_failed, stats.rows_inserted) == (3, 1, 2)
+    assert {"id": "B", "companyId": "1028*"} in api.calls             # retried with the short prefix
+    assert sorted(current_states(db)) == ["A", "B"]                   # C not in Bronze ...
+
+    api.missing = {}
+    again = raw_to_bronze(client(api), db, ["1028"])
+    assert (again.new, again.unchanged, again.rows_inserted) == (1, 2, 1)  # ... so the next run gets it
+
+
+def test_detail_failures_in_a_row_abort(tmp_path):
+    data = [request_record(f"R{i}") for i in range(6)]
+    api = FakeApi(data, missing={r["objectId"]: {"1028399*", "1028*"} for r in data})
+    with pytest.raises(GronosApiError, match="in a row"):
+        raw_to_bronze(client(api), tmp_path / "grid_con.db", ["1028"])

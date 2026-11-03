@@ -8,8 +8,9 @@ RawToBronze (:func:`raw_to_bronze`)
   3. fetch the detail of each remaining objectId,
   4. append one ``GronosExports`` row per detail: ``Content`` = JSON of the
      request as is, ``Timestamp`` = time of the pull (one value per pull).
-  All rows of a pull are written in one transaction; any API error fails the
-  run before anything is written.
+  All rows of a pull are written in one transaction. A list error fails the
+  run before anything is written; a failing detail is skipped (logged, not in
+  Bronze, so the next run tries it again) unless 5 fail in a row.
 
 BronzeToSilver (:func:`bronze_to_silver`)
   1. watermark = ``MAX(BusinessTransactions.TimestampImportBronze)``,
@@ -36,7 +37,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
-from grid_con_ingestion.gronos.client import GronosClient
+from grid_con_ingestion.gronos.client import GronosApiError, GronosClient
 from grid_con_ingestion.gronos.transform import (
     CUSTOMER_VALUE_COLUMNS,
     REQUEST_VALUE_COLUMNS,
@@ -58,6 +59,7 @@ class BronzeStats:
     new: int = 0
     updated: int = 0
     unchanged: int = 0
+    detail_failed: int = 0
     rows_inserted: int = 0
     timestamp: str | None = None
 
@@ -144,6 +146,9 @@ def write_bronze(db_path: str | Path, details: list[dict]) -> tuple[int, str | N
     return len(details), pulled_at
 
 
+MAX_CONSECUTIVE_DETAIL_FAILURES = 5
+
+
 def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]) -> BronzeStats:
     stats = BronzeStats()
     log.info("RawToBronze: %d prefixes (%s ... %s), DB %s", len(prefixes), prefixes[0] if prefixes else "-",
@@ -163,9 +168,24 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
 
     details = []
     detail_start = time.monotonic()
+    consecutive_failures = 0
     for i, rec in enumerate(changed, start=1):
         started = time.monotonic()
-        detail = client.detail(rec["objectId"], rec.get("companyId"))
+        try:
+            detail = client.detail(rec["objectId"], rec.get("companyId"))
+        except GronosApiError as exc:
+            # One bad request must not cost the whole run. It is not in Bronze,
+            # so the next run tries it again. Many failures in a row point to a
+            # general problem (auth, gateway) -> fail the task.
+            stats.detail_failed += 1
+            consecutive_failures += 1
+            log.warning("Detail %d/%d skipped, retried next run: %s", i, len(changed), exc)
+            if consecutive_failures >= MAX_CONSECUTIVE_DETAIL_FAILURES:
+                raise GronosApiError(
+                    f"{consecutive_failures} detail calls in a row failed, aborting (last: {exc})"
+                ) from exc
+            continue
+        consecutive_failures = 0
         elapsed = time.monotonic() - detail_start
         remaining = elapsed / i * (len(changed) - i)
         log.info(
@@ -178,6 +198,8 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
             continue
         details.append(detail)
 
+    if stats.detail_failed:
+        log.warning("%d of %d detail calls failed and were skipped", stats.detail_failed, len(changed))
     log.info("Writing %d rows to GronosExports ...", len(details))
     stats.rows_inserted, stats.timestamp = write_bronze(db_path, details)
     return stats

@@ -25,5 +25,7 @@ class GronosRawToBronzeOperator(BaseOperator):
             "%d requests listed (%d calls, %d duplicates): %d new, %d updated, %d unchanged",
             stats.listed, stats.list_calls, stats.duplicates, stats.new, stats.updated, stats.unchanged,
         )
+        if stats.detail_failed:
+            self.log.warning("%d detail(s) skipped, see warnings above", stats.detail_failed)
         self.log.info("%d rows written to GronosExports (Timestamp %s)", stats.rows_inserted, stats.timestamp)
         return stats.as_dict()
