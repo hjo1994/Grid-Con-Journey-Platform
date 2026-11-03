@@ -171,6 +171,7 @@ class GronosClient:
                 result.split_prefixes.append(prefix)
                 pending[:0] = [prefix + d for d in "0123456789"]
                 continue
+            log.info("Liste companyId=%s%s: %d Datensätze", prefix, WILDCARD, len(found))
             for rec in found:
                 oid = rec.get("objectId")
                 if not oid:

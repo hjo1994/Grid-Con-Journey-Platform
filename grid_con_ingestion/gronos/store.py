@@ -150,9 +150,15 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
 
     known = current_states(db_path)
     changed = select_changed(listing.records, known, stats)
+    log.info(
+        "Liste fertig: %d Anfragen (%d Aufrufe) – %d neu, %d geändert, %d unverändert; hole %d Details",
+        stats.listed, stats.list_calls, stats.new, stats.updated, stats.unchanged, len(changed),
+    )
 
     details = []
-    for rec in changed:
+    for i, rec in enumerate(changed, start=1):
+        if i == 1 or i % 10 == 0 or i == len(changed):
+            log.info("Detail %d/%d (objectId %s)", i, len(changed), rec["objectId"])
         detail = client.detail(rec["objectId"], rec.get("companyId"))
         # Same state as in Bronze already (e.g. list was newer than detail)? skip
         if rec["objectId"] in known and not is_newer(detail.get("updatedAt"), known[rec["objectId"]]):
