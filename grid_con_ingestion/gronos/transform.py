@@ -225,10 +225,10 @@ def to_silver(content: str) -> SilverRecord:
     try:
         rec = json.loads(content)
     except (TypeError, json.JSONDecodeError) as exc:
-        raise InvalidContent(f"kein gültiges JSON: {exc}") from exc
+        raise InvalidContent(f"invalid JSON: {exc}") from exc
     if not isinstance(rec, dict):
-        raise InvalidContent("JSON ist kein Objekt")
+        raise InvalidContent("JSON is not an object")
     request = request_values(rec)
     if request["GronosObjectID"] is None:
-        raise InvalidContent("objectId fehlt")
+        raise InvalidContent("objectId missing")
     return SilverRecord(request=request, customer=customer_values(rec))

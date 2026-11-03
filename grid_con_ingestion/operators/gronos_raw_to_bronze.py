@@ -22,8 +22,8 @@ class GronosRawToBronzeOperator(BaseOperator):
     def execute(self, context) -> dict:
         stats = raw_to_bronze(config.gronos_client(), self.db_path, parse_prefixes(self.prefixes))
         self.log.info(
-            "%d Anfragen gelistet (%d Aufrufe, %d Duplikate): %d neu, %d geändert, %d unverändert",
+            "%d requests listed (%d calls, %d duplicates): %d new, %d updated, %d unchanged",
             stats.listed, stats.list_calls, stats.duplicates, stats.new, stats.updated, stats.unchanged,
         )
-        self.log.info("%d Zeilen nach GronosExports geschrieben (Timestamp %s)", stats.rows_inserted, stats.timestamp)
+        self.log.info("%d rows written to GronosExports (Timestamp %s)", stats.rows_inserted, stats.timestamp)
         return stats.as_dict()

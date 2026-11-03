@@ -146,18 +146,18 @@ def write_bronze(db_path: str | Path, details: list[dict]) -> tuple[int, str | N
 
 def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]) -> BronzeStats:
     stats = BronzeStats()
-    log.info("RawToBronze: %d Präfixe (%s … %s), DB %s", len(prefixes), prefixes[0] if prefixes else "-",
+    log.info("RawToBronze: %d prefixes (%s ... %s), DB %s", len(prefixes), prefixes[0] if prefixes else "-",
              prefixes[-1] if prefixes else "-", db_path)
     listing = client.list_all(prefixes)
     stats.listed, stats.list_calls, stats.duplicates = len(listing.records), listing.calls, listing.duplicates
     if listing.split_prefixes:
-        log.info("Aufgeteilte Präfixe (Gateway-Timeout): %s", listing.split_prefixes)
+        log.info("Split prefixes (gateway timeout): %s", listing.split_prefixes)
 
     known = current_states(db_path)
-    log.info("Bronze kennt bereits %d objectIds", len(known))
+    log.info("Bronze already holds %d objectIds", len(known))
     changed = select_changed(listing.records, known, stats)
     log.info(
-        "Liste fertig: %d Anfragen (%d Aufrufe) – %d neu, %d geändert, %d unverändert; hole %d Details",
+        "List done: %d requests (%d calls) - %d new, %d updated, %d unchanged; fetching %d details",
         stats.listed, stats.list_calls, stats.new, stats.updated, stats.unchanged, len(changed),
     )
 
@@ -169,7 +169,7 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
         elapsed = time.monotonic() - detail_start
         remaining = elapsed / i * (len(changed) - i)
         log.info(
-            "Detail %d/%d objectId %s: %.1f s (gesamt %.0f s, noch ca. %.0f min)",
+            "Detail %d/%d objectId %s: %.1f s (elapsed %.0f s, approx. %.0f min left)",
             i, len(changed), rec["objectId"], time.monotonic() - started, elapsed, remaining / 60,
         )
         # Same state as in Bronze already (e.g. list was newer than detail)? skip
@@ -178,7 +178,7 @@ def raw_to_bronze(client: GronosClient, db_path: str | Path, prefixes: list[str]
             continue
         details.append(detail)
 
-    log.info("Schreibe %d Zeilen nach GronosExports …", len(details))
+    log.info("Writing %d rows to GronosExports ...", len(details))
     stats.rows_inserted, stats.timestamp = write_bronze(db_path, details)
     return stats
 
@@ -270,7 +270,7 @@ def bronze_to_silver(db_path: str | Path) -> SilverStats:
                 record = to_silver(content)
             except InvalidContent as exc:
                 stats.rows_rejected += 1
-                log.warning("GronosExports %s nicht verarbeitbar (%s) – nur in Bronze", export_id, exc)
+                log.warning("GronosExports %s cannot be processed (%s) - kept in Bronze only", export_id, exc)
                 continue
 
             customer_id = _upsert_customer(conn, record.customer, stats) if record.customer else None

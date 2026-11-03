@@ -19,7 +19,7 @@ class GronosBronzeToSilverOperator(BaseOperator):
 
     def execute(self, context) -> dict:
         stats = bronze_to_silver(self.db_path)
-        self.log.info("Silver geschrieben nach %s: %s", self.db_path, stats.as_dict())
+        self.log.info("Silver written to %s: %s", self.db_path, stats.as_dict())
         if stats.rows_rejected:
-            self.log.warning("%d Bronze-Zeile(n) nicht verarbeitbar, siehe Warnungen", stats.rows_rejected)
+            self.log.warning("%d Bronze row(s) could not be processed, see warnings", stats.rows_rejected)
         return stats.as_dict()
