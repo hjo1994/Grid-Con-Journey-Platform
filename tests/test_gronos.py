@@ -286,3 +286,27 @@ def test_detail_mode_auto_uses_complete_list_records(tmp_path):
 def test_detail_mode_rejects_unknown_value(tmp_path):
     with pytest.raises(ValueError):
         raw_to_bronze(client(FakeApi([])), tmp_path / "grid_con.db", ["1028"], detail_mode="sometimes")
+
+
+def test_transform_acc_shape():
+    """ACC: all values as strings, no expansionStageGroup / displayName / contact names."""
+    rec = request_record("A", status="22", nextActor="2", dsoContacted="false", friendlyId="22554")
+    rec["expansionStageConnections"] = [
+        {"objectId": "S1", "connectionType": "7", "startDate": "2026-05-29T22:00:00.000", "capacity": "50.0"},
+        {"objectId": "S2", "connectionType": "12", "startDate": "2026-05-29T22:00:00.000", "capacity": "50.0"},
+        {"objectId": "S3", "connectionType": "7", "startDate": "2026-06-01T22:00:00.000", "capacity": "1.0"},
+    ]
+    rec["locations"] = [{"objectId": "L1", "note": "", "coordinate": {"latitude": "", "longitude": ""},
+                         "address": {"street": "", "streetNumber": "", "postalCode": "", "municipality": "",
+                                     "countryCode": "DE"}}]
+    rec["contacts"] = [{"objectId": "C1", "role": "1", "partyId": "8000000000",
+                        "companyInfo": {"partyId": "1028399", "legalName": "Unternehmen-2 AG", "vatNumber": ""}}]
+    del rec["documents"]
+    r, c = (lambda s: (s.request, s.customer))(to_silver(json.dumps(rec)))
+    assert (r["RequestStatus"], r["NextActor"], r["DsoContacted"], r["id_gronos_new"]) == ("22", "2", False, 22554)
+    assert r["GenerationTechnology"] == "7 | 12"                       # connectionType fallback, unique
+    assert r["maxP"] == pytest.approx(101.0)
+    assert r["CommissioningDate"] == "2026-05-29 22:00:00.000000"
+    assert (r["SubstationLocation"], r["Latitude"], r["DocumentURL"]) == (None, None, None)
+    assert c == {"CompanyID": "1028399", "CustomerName": "Unternehmen-2 AG", "CustomerContactPerson": None,
+                 "CustomerContactPersonEmail": None, "VatNumber": None}
