@@ -23,3 +23,24 @@ def source_kwargs() -> dict:
     if SOURCE_TYPE == "api":
         return {"base_url": API_BASE_URL, "conn_id": API_CONN_ID, "staging_dir": str(SOURCE_DIR)}
     raise ValueError(f"Unbekannter GRID_CON_SOURCE_TYPE: {SOURCE_TYPE}")
+
+
+# --------------------------------------------------------------------------- #
+# GRONOS-API (RawToBronze)
+# --------------------------------------------------------------------------- #
+# Airflow Connection mit host = Basis-URL, login = Client ID, password = Secret.
+# Ohne Connection greifen die Env-Variablen (lokal).
+GRONOS_CONN_ID = os.environ.get("GRONOS_CONN_ID", "grid_con_gronos_api")
+GRONOS_BASE_URL = os.environ.get("GRONOS_BASE_URL", "")
+GRONOS_CLIENT_ID = os.environ.get("GRONOS_CLIENT_ID", "")
+GRONOS_CLIENT_SECRET = os.environ.get("GRONOS_CLIENT_SECRET", "")
+# Startpräfixe der companyId; bei Timeouts wird automatisch verfeinert.
+GRONOS_COMPANY_PREFIXES = os.environ.get("GRONOS_COMPANY_PREFIXES", "0 1 2 3 4 5 6 7 8 9").split()
+GRONOS_SCHEDULE = os.environ.get("GRONOS_SCHEDULE", "*/30 * * * *")
+
+# BronzeToGold läuft auf Auslösung durch das Backend (Airflow REST API).
+# Optionaler Sicherheitsnetz-Zeitplan, z. B. "*/5 * * * *"; leer = nur ausgelöst.
+GOLD_SCHEDULE = os.environ.get("GRID_CON_GOLD_SCHEDULE", "") or None
+
+# Asset-URIs, über die die DAGs einander auslösen
+GRONOS_BRONZE_ASSET_URI = "grid-con://bronze/GronosExports"

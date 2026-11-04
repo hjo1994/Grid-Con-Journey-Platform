@@ -1,4 +1,8 @@
-"""Input Orchestration DAG: wartet auf eine neue C4C/GRONOS-Lieferung,
+"""LEGACY (C4C-Excel-Export) – abgelöst durch grid_con_raw_to_bronze /
+grid_con_bronze_to_silver (GRONOS-API). Bleibt für lokale Läufe mit dem
+anonymisierten Excel-Export erhalten.
+
+Input Orchestration DAG: wartet auf eine neue C4C/GRONOS-Lieferung,
 legt sie as is in Bronce (C4CExports) ab und lädt daraus die
 Netzanschlussanfragen nach Silver – beides in der zentralen SQLite-Datenbank
 (data/db).

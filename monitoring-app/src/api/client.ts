@@ -1,6 +1,12 @@
 import type {
   AggregateResult,
   Customer,
+  EvaluationCriterion,
+  EvaluationEntry,
+  EvaluationHistory,
+  EvaluationInputItem,
+  EvaluationState,
+  User,
   GridConnectionRequestWithCustomer,
   Meta,
   Page,
@@ -27,6 +33,8 @@ function messageFor(status: number | null): string {
   if (status === null) return "Das Backend ist nicht erreichbar.";
   if (status === 404) return "Die Anfrage wurde nicht gefunden.";
   if (status === 503) return "Die Datenbank ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.";
+  if (status === 401 || status === 403) return "Du bist für diese Bewertung nicht berechtigt.";
+  if (status === 422) return "Die Eingabe passt nicht zum Bewertungs-Framework.";
   return `Die Daten konnten nicht geladen werden (HTTP ${status}).`;
 }
 
@@ -55,6 +63,21 @@ async function get<T>(path: string, params?: Params, signal?: AbortSignal): Prom
   return (await res.json()) as T;
 }
 
+async function post<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(null, messageFor(null));
+  }
+  if (!res.ok) throw new ApiError(res.status, messageFor(res.status));
+  return (await res.json()) as T;
+}
+
 export interface ListQuery {
   q: string;
   sort: SortField;
@@ -75,6 +98,20 @@ export const api = {
 
   aggregate: (params: { group_by: string; exclude_status?: string[]; split_multi?: boolean }, signal?: AbortSignal) =>
     get<AggregateResult>("/grid-connection-requests/aggregate", params, signal),
+
+  users: (signal?: AbortSignal) => get<User[]>("/users", undefined, signal),
+
+  framework: (signal?: AbortSignal) => get<EvaluationCriterion[]>("/evaluation-framework", undefined, signal),
+
+  evaluation: (idGronosNew: number, signal?: AbortSignal) =>
+    get<EvaluationState>(`/grid-connection-requests/${idGronosNew}/evaluation`, undefined, signal),
+
+  history: (idGronosNew: number, signal?: AbortSignal) =>
+    get<EvaluationHistory>(`/grid-connection-requests/${idGronosNew}/evaluation-history`, undefined, signal),
+
+  // No authentication yet: the acting user goes in X-User-ID (see backend README).
+  saveEvaluation: (idGronosNew: number, userId: string, checks: EvaluationInputItem[]) =>
+    post<{ items: EvaluationEntry[] }>(`/grid-connection-requests/${idGronosNew}/evaluation-inputs`, { checks }, { "X-User-ID": userId }),
 
   // The request list carries only customer_id; names come from the customer
   // resource, loaded completely once (about 120 customers).

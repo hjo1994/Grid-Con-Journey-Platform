@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from app.api import customers, reference, requests
+from app.api import customers, evaluation, reference, requests
 from app.config import API_VERSION, get_db_path
 from app.db import make_engine
 
@@ -15,10 +15,13 @@ def get_app(db_path: Path | None = None) -> FastAPI:
     app = FastAPI(
         title="Grid Con API",
         version=API_VERSION,
-        description="Read-only API over the Silver layer of the Grid Con database "
-        "(grid connection requests and customers).",
+        description="API over the Grid Con database: grid connection requests and "
+        "customers (Silver, read-only), the evaluation framework, users and the "
+        "collaborative evaluation (Gold; evaluators' input is written to Bronze).",
     )
-    app.state.engine = make_engine(db_path or get_db_path())
+    path = db_path or get_db_path()
+    app.state.engine = make_engine(path)
+    app.state.write_engine = make_engine(path, mode="rw")
 
     @app.exception_handler(OperationalError)
     async def _db_unavailable(_: Request, __: OperationalError) -> JSONResponse:
@@ -36,4 +39,5 @@ def get_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(requests.router)
     app.include_router(customers.router)
     app.include_router(reference.router)
+    app.include_router(evaluation.router)
     return app

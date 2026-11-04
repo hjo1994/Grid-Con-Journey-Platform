@@ -1,10 +1,10 @@
 # Backend — FastAPI + SQLAlchemy
 
-Eigenes Deployment. Stellt die Silver-Tabellen der zentralen Datenbank über
-eine **read-only** REST-API bereit. Die Endpunkte bilden Ressourcen ab, keine
+Eigenes Deployment. Stellt die Silver-, Gold- und Config-Tabellen der
+zentralen Datenbank über eine REST-API bereit. Die Endpunkte bilden Ressourcen ab, keine
 Ansichten einer bestimmten App: Darstellungslogik (Prozessschritt,
-C4C-Deeplink, Widget-Zuschnitt) rechnet der jeweilige Konsument. Kein
-Schreibpfad.
+C4C-Deeplink, Widget-Zuschnitt) rechnet der jeweilige Konsument. Einziger
+Schreibpfad: Bewertungseingaben (siehe unten).
 
 Interaktive Doku (OpenAPI, von FastAPI erzeugt): `/docs`, Schema unter
 `/openapi.json`.
@@ -22,6 +22,11 @@ Interaktive Doku (OpenAPI, von FastAPI erzeugt): `/docs`, Schema unter
 | `GET /request-statuses` | Status mit `order`, `phase`, `in_process` aus der Backend-Konfiguration, danach Status aus den Daten, die nicht konfiguriert sind (`configured: false`, `order: null`) |
 | `GET /meta` | `api_version`, `data_as_of` |
 | `GET /api/healthz` | Liveness, prüft nicht die DB |
+| `GET /users` | Nutzer:innen mit `role` (`netzplanung`, `flaechen_recht`, `finanzen`, `viewer`) |
+| `GET /evaluation-framework` | Kriterien → Unterkriterien → Checks mit Gewicht, `scoring_group`, `max_score`, `check_type` (`minimum`/`points`), `points`, `graded`, `alternative_group` |
+| `GET /grid-connection-requests/{id}/evaluation` | Aktueller Stand je Nutzer:in und Check (`verdict`, `score`, `comment`, `version`, `timestamp`, `pending`), plus Liste der Prüfer:innen |
+| `GET /grid-connection-requests/{id}/evaluation-history` | Änderungsverlauf, neueste zuerst, mit Vorwert; `kind=all\|ratings\|comments`, `scoring_group`, `user_id` |
+| `POST /grid-connection-requests/{id}/evaluation-inputs` | Ein oder mehrere Checks bewerten/kommentieren. Header `X-User-ID` (fehlt/unbekannt `401`, Rolle `viewer` `403`), ungültige Werte `422`, sonst `201` |
 
 **Feldnamen:** die Silver-Spalten in snake_case (`RequestStatus` →
 `request_status`, `maxP` → `max_p`, `CustomerID` → `customer_id`). Zeitstempel
@@ -39,6 +44,21 @@ weder „Wind Onshore“ noch „Windkraft“).
 `/request-statuses`, nicht dem Alphabet. Fehlende Werte stehen in beiden
 Richtungen am Ende (portabel über `IS NULL`, kein `NULLS LAST`).
 
+## Bewertung (K1/K4)
+
+- **Schreiben:** `POST …/evaluation-inputs` hängt je Check eine Zeile an
+  `UserEvaluationInputs` (Bronze, append-only) in einer `BEGIN IMMEDIATE`-
+  Transaktion an; Zeitstempel sind innerhalb der Sperre streng monoton. Danach
+  wird im Hintergrund der DAG `grid_con_bronze_to_gold` über die Airflow-REST-API
+  ausgelöst (best effort; ohne Konfiguration greift der Zeitplan des DAGs).
+- **Lesen live:** Der Bewertungsstand ist Gold (`RequestEvaluationChecks`)
+  plus alle Eingaben nach der Gold-Wasserlinie (`pending: true`). Eine
+  Eingabe ist damit sofort sichtbar, auch bevor der DAG gelaufen ist; Version
+  und Vorwert werden für ausstehende Eingaben genauso berechnet wie in Gold.
+- **Punktzahl:** rechnet die App aus den Verdikten (Regeln aus der
+  Bewertungs-Excel, siehe `monitoring-app/src/domain/scoring.ts`).
+- **Nutzer:in:** bis zur Authentifizierung über den Header `X-User-ID`.
+
 ## Status-Konfiguration
 
 Reihenfolge und Phasen stehen in `app/config.py` (`PROCESS_PHASES`,
@@ -54,9 +74,11 @@ noch aus.**
 
 Wie im AI-Cockpit-Backend:
 
-- Die Datei wird auf SQLite-Ebene `mode=ro` geöffnet (getestet).
-- **Kein Connection-Pool** (`NullPool`): Input Orchestration ersetzt die Datei
-  per atomarem Rename, jede Anfrage öffnet sie neu (getestet).
+- Lesende Anfragen öffnen die Datei auf SQLite-Ebene `mode=ro` (getestet);
+  nur der Bewertungs-POST nutzt eine eigene `mode=rw`-Engine.
+- **Kein Connection-Pool** (`NullPool`): jede Anfrage öffnet die Datei neu
+  (auch ein Austausch per Rename wird gesehen, getestet). `timeout=10` als
+  `busy_timeout` gegenüber Input Orchestration.
 - Schlägt das Öffnen fehl, 3 Versuche mit kurzem Backoff, danach `503` +
   `Retry-After` (getestet mit fehlender Datei).
 
@@ -69,17 +91,18 @@ backend/
   app/
     main.py          # get_app() — mit uvicorn als Factory starten
     config.py        # GRID_CON_DB_PATH (Default /data/db/grid_con.db), Status-Katalog
-    db.py            # read-only Engine, Session mit Retry
-    models.py        # Kopie der Silver-Modelle aus input-orchestration (von Hand synchron halten)
+    db.py            # Engine (ro/rw), Session mit Retry
+    models.py        # Kopie der Modelle aus input-orchestration (von Hand synchron halten)
+    evaluation.py    # Bewertungsstand (Gold + ausstehende Eingaben), Schreiben, DAG-Trigger
     queries.py       # gemeinsame Filter, "neuester Eintrag je Ticket"
     schemas.py
-    api/requests.py, api/customers.py, api/reference.py
+    api/requests.py, api/customers.py, api/reference.py, api/evaluation.py
   tests/             # synthetische Test-DB, keine echten Daten
 ```
 
-`app/models.py` ist eine von Hand gepflegte Kopie des Silver-Teils von
+`app/models.py` ist eine von Hand gepflegte Kopie der benötigten Tabellen aus
 `input-orchestration/grid_con_ingestion/models.py` (separate Images, kein
-gemeinsames Paket). Bronce (`C4CExports`) liest das Backend nicht.
+gemeinsames Paket). Von Bronze kennt das Backend nur `UserEvaluationInputs`.
 
 ## Lokal starten
 
@@ -93,12 +116,16 @@ GRID_CON_DB_PATH=../input-orchestration/data/db/grid_con.db \
 
 Startkommando im Deployment:
 `uvicorn app.main:get_app --factory --host 0.0.0.0 --port 8000`.
-ConfigMap: `GRID_CON_DB_PATH` (Volume read-only). Die `poetry.lock` fehlt noch
+ConfigMap: `GRID_CON_DB_PATH` (Volume **schreibbar**, wegen der
+Bewertungseingaben), optional `AIRFLOW_API_URL` mit `AIRFLOW_API_TOKEN` oder
+`AIRFLOW_API_USERNAME`/`AIRFLOW_API_PASSWORD` und `GRID_CON_GOLD_DAG_ID`
+(Default `grid_con_bronze_to_gold`) für den DAG-Trigger. Die `poetry.lock` fehlt noch
 und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
 
 ## Offen
 
-- **Authentifizierung:** noch keine. Das AI-Cockpit-Backend nutzt `eg-auth`;
+- **Authentifizierung:** noch keine; die Bewertung vertraut dem Header
+  `X-User-ID`. Das AI-Cockpit-Backend nutzt `eg-auth`;
   das wird nachgezogen, sobald die Gruppen feststehen.
 - **Ticket-Schlüssel:** Die API identifiziert ein Ticket über `id_gronos_new`
   (abgestimmt). Input Orchestration behandelt dagegen Ticketname + Ticket-ID
@@ -107,6 +134,14 @@ und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
   neuesten (Projekt-0002).
 
 ## Verifiziert
+
+33 Tests (04.11.2026), zusätzlich zu den unten genannten: Nutzer, Framework,
+Bewertungsstand aus Gold + ausstehenden Eingaben, Versionen und Vorwerte,
+Verlauf mit Filtern, POST mit 401/403/422/201, DAG-Trigger. Live im Browser:
+die eigene Summe ändert sich nach einem Klick sofort, ein zweiter Browser
+sieht die Änderung nach etwa 2 s.
+
+### Früherer Stand (13.10.2026)
 
 23 Tests gegen eine synthetische Test-DB (aktueller Stand vs. Historie,
 alle Filter, Suche inkl. `%`/`_`-Escaping, Sortierung nach Prozessreihenfolge

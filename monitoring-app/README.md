@@ -1,6 +1,6 @@
 # Monitoring-App — React
 
-Eigenes Deployment, eigene Anwendung. Konsumiert ausschließlich die read-only
+Eigenes Deployment, eigene Anwendung. Konsumiert ausschließlich die
 Backend-API (`/api/v1`, siehe `backend/README.md`); kein eigener Datenzugriff.
 Stack wie das AI-Cockpit-Frontend: React 18 + Vite + TypeScript, gleiche
 Versionen, Schrift (IBM Plex) als Dateien im Repo (`src/fonts/`, OFL-Lizenzen
@@ -21,6 +21,31 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
   (`/aggregate?group_by=request_status`) und *Aktive Leistung nach
   Technologie* (`/aggregate?group_by=generation_technology&exclude_status=Eingestellt&split_multi=true`;
   die fünf größten nach MW, Rest als „Übrige“).
+
+## Bewertung: K1 und K4
+
+Hash-Routen: `#/` Übersicht, `#/antraege/<id>/bewertung` (K1),
+`#/antraege/<id>/verlauf` (K4). Im Detailbereich führen „Reifegrad bewerten“
+und „Verlauf“ dorthin.
+
+- **Angemeldet als:** Auswahl der Nutzer:in in der Kopfzeile (bis zur
+  Authentifizierung), gespeichert in `localStorage` (`gridcon.userId`),
+  gesendet als `X-User-ID`.
+- **K1 – Spalte je Prüfer:in:** je Bewertungsgruppe (A1, A2, B1+B2, …) eine
+  Spalte pro Prüfer:in. Die eigene Spalte ist bearbeitbar (Checks aufklappen,
+  erfüllt / nicht erfüllt / offen, bei D1 abgestufte Punkte), die anderen sind
+  read-only. Abweichende Punktzahlen werden markiert. Begründungen je
+  Unterkriterium im Seitenpanel. Fußzeile: Reifegrad je Prüfer:in und
+  Spannweite.
+- **K4 – Verlauf:** links aktueller Stand je Nutzer:in und Gruppe, rechts das
+  Änderungsprotokoll (Alles / Nur Bewertungen / Nur Begründungen), mit
+  Punktzahl vorher → nachher.
+- **Live:** Speichern ist optimistisch, der Stand wird alle 4 s neu geladen
+  (`src/domain/useEvaluation.ts`).
+- **Punktzahl** (`src/domain/scoring.ts`), Regeln aus der Bewertungs-Excel:
+  Mindestanforderungen müssen erfüllt sein (Alternativen: eine reicht), sonst
+  0; Punkte-Checks geben den höchsten erreichten Wert, gedeckelt auf das
+  Gruppenmaximum; Reifegrad = Σ Gewicht × Punkte/Max.
 
 ## Logik in der App (bewusst nicht im Backend)
 
@@ -67,11 +92,19 @@ ist gitignored und muss im Firmennetz erzeugt werden.
 
 ## Offen
 
-- **Authentifizierung**: keine, weil das Backend noch keine hat. Wird wie im
+- **Authentifizierung**: keine, weil das Backend noch keine hat; die
+  Nutzerauswahl ist ein Platzhalter. Wird wie im
   AI Cockpit über `eg-auth-react` nachgezogen.
 - **C4C-URL-Schema** und ob `document_url` künftig echte ELO-Links enthält.
 
 ## Verifiziert
+
+26 Tests (04.11.2026), zusätzlich: Punkteregeln (Mindestanforderungen,
+Alternativen, Deckelung, abgestufte Punkte, Reifegrad), Abweichungen,
+Verlaufs-Replay, K1 (eigene Spalte bearbeitbar, fremde read-only, Speichern).
+Im Browser gegen eine Demo-DB mit drei Prüfer:innen geprüft.
+
+### Früherer Stand (13.10.2026)
 
 16 Tests (Prozessschritt, Phasen-Gruppierung inkl. unbekannter Status,
 Status-Farben, Top-5-Technologien, C4C-/ELO-Links, Query-Parameter, Liste mit

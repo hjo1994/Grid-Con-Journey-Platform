@@ -1,5 +1,5 @@
 // Synthetic data in the backend's response shapes; no real data.
-import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus } from "../api/types";
+import type { AggregateResult, EvaluationCriterion, Customer, GridConnectionRequest, RequestPage, RequestStatus } from "../api/types";
 
 const s = (name: string, order: number, phase: string | null): RequestStatus => ({ name, order, phase, in_process: phase !== null, configured: true });
 
@@ -68,3 +68,23 @@ export const BY_TECH: AggregateResult = {
   ],
   data_as_of: "2026-10-13T14:54:38Z",
 };
+
+// Small evaluation framework in the shape of /evaluation-framework.
+const chk = (id: string, check_type: "minimum" | "points", points = 0, alternative_group: string | null = null, graded = false) => ({
+  id, description: null, check_type, points, graded, alternative_group, document_category: null,
+});
+const sub = (id: string, group: string, max: number, checks: ReturnType<typeof chk>[]) => ({
+  id, name: id, scoring_group: group, scoring_group_name: group, max_score: max, question: null, checks,
+});
+
+export const FRAMEWORK: EvaluationCriterion[] = [
+  { id: "F", name: "Formal", weight: 0, sub_criteria: [sub("F1", "F1", 0, [chk("F.1.1", "minimum")])] },
+  { id: "B", name: "Technik", weight: 0.5, sub_criteria: [
+    sub("B1", "B1+B2", 1, [chk("B1-01", "minimum")]),
+    sub("B2", "B1+B2", 1, [chk("B2-06", "points", 1)]),
+    sub("B3", "B3", 2, [chk("B3-01", "minimum"), chk("B3-03", "points", 1), chk("B3-04", "points", 2)]),
+  ] },
+  { id: "C", name: "Finanzen", weight: 0.5, sub_criteria: [
+    sub("C1", "C1", 2, [chk("C1-01", "minimum", 0, "M"), chk("C1-02", "minimum", 0, "M"), chk("D1-01", "points", 2, null, true)]),
+  ] },
+];

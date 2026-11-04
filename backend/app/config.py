@@ -45,3 +45,18 @@ def status_catalogue() -> list[dict]:
     ]
     entries += [{"name": name, "phase": None, "in_process": False} for name in OUTSIDE_PROCESS]
     return [{**entry, "order": i} for i, entry in enumerate(entries, start=1)]
+
+
+# Airflow REST API, used to trigger BronzeToGold after an evaluation input.
+# Empty URL = no trigger (BronzeToGold then runs on its own schedule; the
+# evaluation view shows unprocessed inputs as "pending" in the meantime).
+AIRFLOW_GOLD_DAG_ID = os.environ.get("GRID_CON_GOLD_DAG_ID", "grid_con_bronze_to_gold")
+
+
+def airflow_settings() -> dict[str, str]:
+    return {
+        "url": os.environ.get("AIRFLOW_API_URL", "").rstrip("/"),
+        "token": os.environ.get("AIRFLOW_API_TOKEN", ""),
+        "username": os.environ.get("AIRFLOW_API_USERNAME", ""),
+        "password": os.environ.get("AIRFLOW_API_PASSWORD", ""),
+    }

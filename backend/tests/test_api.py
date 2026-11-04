@@ -51,6 +51,15 @@ def test_list_returns_newest_entry_per_ticket_with_silver_fields(client):
         "switch_count": None,
         "document_url": None,
         "request_comment": None,
+        "gronos_object_id": None,
+        "next_actor": None,
+        "project_phase": None,
+        "dso_contacted": None,
+        "dso_response": None,
+        "commissioning_date": None,
+        "latitude": None,
+        "longitude": None,
+        "source_updated_at": None,
         "timestamp": "2026-10-02T08:00:00Z",
     }
 
@@ -127,6 +136,8 @@ def test_detail_returns_current_state_and_optional_customer(client):
         "customer_name": "Solar 100% GmbH",
         "customer_contact_person": "Anna",
         "customer_contact_person_email": "a@example.invalid",
+        "company_id": None,
+        "vat_number": None,
     }
     assert client.get(f"{BASE}/999").status_code == 404
     assert client.get(f"{BASE}/100?expand=owner").status_code == 422

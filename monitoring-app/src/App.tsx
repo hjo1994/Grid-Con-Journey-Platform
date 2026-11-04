@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, ApiError, type ListQuery } from "./api/client";
-import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField } from "./api/types";
+import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField, User } from "./api/types";
 import { DetailPanel } from "./components/DetailPanel";
+import { EvaluationView } from "./components/EvaluationView";
+import { HistoryView } from "./components/HistoryView";
 import { Pager, RequestTable } from "./components/RequestTable";
 import { ErrorNote } from "./components/small";
 import { StatusWidget, TechWidget } from "./components/Widgets";
 import { fmtShortDateTime } from "./domain/format";
+import { hrefOf, useRoute } from "./domain/route";
 import { groupByPhase, STOPPED_STATUS } from "./domain/status";
 import { techShares } from "./domain/technology";
 
@@ -28,7 +31,95 @@ function latest(...values: (string | null | undefined)[]): string | null {
   return values.filter((v): v is string => !!v).sort().at(-1) ?? null;
 }
 
+const USER_KEY = "gridcon.userId";
+
+function storedUserId(): string | null {
+  try {
+    return window.localStorage.getItem(USER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+// No authentication yet (see README): the user picks who they are. The choice
+// is sent to the backend as X-User-ID when saving an evaluation.
+function useCurrentUser() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [userId, setUserId] = useState<string | null>(storedUserId);
+  useEffect(() => {
+    api.users().then(setUsers).catch(() => setUsers([]));
+  }, []);
+  const me = users.find((u) => u.id === userId) ?? users.find((u) => u.can_evaluate) ?? null;
+  const choose = (id: string) => {
+    setUserId(id);
+    try {
+      window.localStorage.setItem(USER_KEY, id);
+    } catch {
+      /* private mode: choice lasts for the session only */
+    }
+  };
+  return { users, me, choose };
+}
+
 export default function App() {
+  const route = useRoute();
+  const { users, me, choose } = useCurrentUser();
+  const [asOf, setAsOf] = useState<string | null>(null);
+
+  return (
+    <div className="app">
+      <header className="bar">
+        <span className="brand">
+          GRID CON <i>Monitoring</i>
+        </span>
+        <nav>
+          <a href="#/" className={route.page === "overview" ? "on" : undefined}>
+            Übersicht
+          </a>
+          {route.page !== "overview" && (
+            <a href={hrefOf(route)} className="on">
+              {route.page === "history" ? "Verlauf" : "Bewertung"}
+            </a>
+          )}
+        </nav>
+        <span className="sync">
+          {route.page === "overview" ? (
+            <>
+              Datenstand <b className={asOf ? "" : "unknown"}>●</b> {asOf ?? "unbekannt"}
+            </>
+          ) : (
+            users.length > 0 && (
+              <label className="me">
+                angemeldet als{" "}
+                <select value={me?.id ?? ""} onChange={(e) => choose(e.target.value)} aria-label="Nutzer:in wählen">
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.role_label} · {u.name ?? u.email}
+                    </option>
+                  ))}
+                </select>
+                {me && <span> · {me.can_evaluate ? "zur Bewertung berechtigt" : "nur lesend"}</span>}
+              </label>
+            )
+          )}
+        </span>
+      </header>
+      {route.page === "evaluation" ? (
+        <main className="body">
+          <EvaluationView key={route.id} id={route.id} me={me} />
+        </main>
+      ) : route.page === "history" ? (
+        <main className="body">
+          <HistoryView key={route.id} id={route.id} me={me} />
+        </main>
+      ) : (
+        <Overview onAsOf={setAsOf} />
+      )}
+    </div>
+  );
+}
+
+function Overview({ onAsOf }: { onAsOf: (asOf: string | null) => void }) {
   const [ref, setRef] = useState<Reference | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
 
@@ -92,21 +183,9 @@ export default function App() {
     }));
 
   const asOf = fmtShortDateTime(latest(page?.data_as_of, ref?.byStatus.data_as_of, ref?.byTech.data_as_of));
+  useEffect(() => onAsOf(asOf), [asOf, onAsOf]);
 
   return (
-    <div className="app">
-      <header className="bar">
-        <span className="brand">
-          GRID CON <i>Monitoring</i>
-        </span>
-        <nav>
-          <span className="on">Übersicht</span>
-        </nav>
-        <span className="sync">
-          Datenstand <b className={asOf ? "" : "unknown"}>●</b> {asOf ?? "unbekannt"}
-        </span>
-      </header>
-
       <main className="body">
         <div className="toolbar">
           <h2>Anfragen</h2>
@@ -156,6 +235,5 @@ export default function App() {
           )
         )}
       </main>
-    </div>
   );
 }
