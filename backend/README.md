@@ -26,7 +26,8 @@ Interaktive Doku (OpenAPI, von FastAPI erzeugt): `/docs`, Schema unter
 | `GET /evaluation-framework` | Kriterien → Unterkriterien → Checks mit Gewicht, `scoring_group`, `max_score`, `check_type` (`minimum`/`points`), `points`, `graded`, `alternative_group` |
 | `GET /grid-connection-requests/{id}/evaluation` | Aktueller Stand je Nutzer:in und Check (`verdict`, `score`, `comment`, `version`, `timestamp`, `pending`), plus Liste der Prüfer:innen |
 | `GET /grid-connection-requests/{id}/evaluation-history` | Änderungsverlauf, neueste zuerst, mit Vorwert; `kind=all\|ratings\|comments`, `scoring_group`, `user_id` |
-| `POST /grid-connection-requests/{id}/evaluation-inputs` | Ein oder mehrere Checks bewerten/kommentieren. Header `X-User-ID` (fehlt/unbekannt `401`, Rolle `viewer` `403`), ungültige Werte `422`, sonst `201` |
+| `GET /users/{id}/evaluations` | „Meine Bewertungen“: alle Anträge, die die Nutzer:in bewertet hat, zuletzt geändert zuerst, mit ihrem aktuellen Stand je Check (`checks`), `last_change`, `pending`; unbekannte Nutzer:in `404` |
+| `POST /grid-connection-requests/{id}/evaluation-inputs` | Ein oder mehrere Checks bewerten/kommentieren (die App sendet alles mit „Bewertung speichern“ in einem Aufruf). Header `X-User-ID` (fehlt/unbekannt `401`, Rolle `viewer` `403`), ungültige Werte `422`, sonst `201` mit `items` (nur ändernde Eingaben) und `unchanged` |
 
 **Feldnamen:** die Silver-Spalten in snake_case (`RequestStatus` →
 `request_status`, `maxP` → `max_p`, `CustomerID` → `customer_id`). Zeitstempel
@@ -55,6 +56,13 @@ Richtungen am Ende (portabel über `IS NULL`, kein `NULLS LAST`).
   plus alle Eingaben nach der Gold-Wasserlinie (`pending: true`). Eine
   Eingabe ist damit sofort sichtbar, auch bevor der DAG gelaufen ist; Version
   und Vorwert werden für ausstehende Eingaben genauso berechnet wie in Gold.
+- **Delta:** BronzeToGold speichert nur Änderungen (gleicher Verdict, gleiche
+  Punkte und kein neuer Kommentar → kein Gold-Eintrag). Der Lesepfad wendet
+  dieselbe Regel auf ausstehende Eingaben an (`evaluation.unchanged`), damit
+  der Stand vor und nach dem DAG-Lauf gleich aussieht. Bronze behält jede
+  Eingabe.
+- **Meine Bewertungen:** `GET /users/{id}/evaluations` nutzt denselben
+  Lesepfad; den Reifegrad rechnet die App wie in K1.
 - **Punktzahl:** rechnet die App aus den Verdikten (Regeln aus der
   Bewertungs-Excel, siehe `monitoring-app/src/domain/scoring.ts`).
 - **Nutzer:in:** bis zur Authentifizierung über den Header `X-User-ID`.
@@ -135,9 +143,10 @@ und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
 
 ## Verifiziert
 
-33 Tests (04.11.2026), zusätzlich zu den unten genannten: Nutzer, Framework,
+35 Tests (04.11.2026), zusätzlich zu den unten genannten: Nutzer, Framework,
 Bewertungsstand aus Gold + ausstehenden Eingaben, Versionen und Vorwerte,
-Verlauf mit Filtern, POST mit 401/403/422/201, DAG-Trigger. Live im Browser:
+Verlauf mit Filtern, POST mit 401/403/422/201, DAG-Trigger, Delta-Regel für
+ausstehende Eingaben, „Meine Bewertungen“. Live im Browser:
 die eigene Summe ändert sich nach einem Klick sofort, ein zweiter Browser
 sieht die Änderung nach etwa 2 s.
 

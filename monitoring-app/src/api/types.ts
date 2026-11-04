@@ -150,3 +150,21 @@ export interface EvaluationInputItem {
   score?: number | null;
   comment?: string | null;
 }
+
+/** "Meine Bewertungen": one request the user has evaluated with their current results. */
+export interface UserEvaluationItem {
+  id_gronos_new: number;
+  id_gronos_old: string | null;
+  generation_technology: string | null;
+  max_p: number | null;
+  request_status: string | null;
+  checks: EvaluationEntry[];
+  last_change: string;
+  pending: boolean;
+}
+
+export interface UserEvaluations {
+  user: User;
+  items: UserEvaluationItem[];
+  total: number;
+}

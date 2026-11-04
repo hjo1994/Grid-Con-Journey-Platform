@@ -8,6 +8,12 @@ the inputs after the Gold watermark (highest InputBronzeTimestamp of the Gold
 BusinessTransactions) and marks those as ``pending``. Once the DAG has run,
 the same entry comes from Gold with the same values.
 
+BronzeToGold stores only changes (delta): an input whose verdict and score
+equal the newest entry of the same user and check and that carries no new
+comment gets no Gold entry. The read model applies the same rule
+(``unchanged``) to pending inputs, so they look the same before and after the
+DAG run.
+
 A request (``id_gronos_new``) has several Silver states; evaluations belong to
 the request, not to one state, so every query goes over all states of the
 ticket.
@@ -89,16 +95,22 @@ def entries(session: Session, id_gronos_new: int) -> list[Entry]:
     if mark is not None:
         pending_q = pending_q.where(UserEvaluationInput.Timestamp > mark)
     valid_checks = set(session.scalars(select(EvaluationCheck.ID)))
-    versions: dict[tuple[str, str], int] = {}
+    newest: dict[tuple[str, str], Entry] = {}
     for e in result:
-        versions[(e.user_id, e.evaluation_check_id)] = max(versions.get((e.user_id, e.evaluation_check_id), 0), e.version)
+        key = (e.user_id, e.evaluation_check_id)
+        if key not in newest or e.version > newest[key].version:
+            newest[key] = e
     for i in session.scalars(pending_q.order_by(UserEvaluationInput.Timestamp)).all():
         if i.EvaluationCheckID not in valid_checks:
             continue
         key = (i.UserID, i.EvaluationCheckID)
-        versions[key] = versions.get(key, 0) + 1
-        result.append(Entry(i.ID, i.UserID, i.EvaluationCheckID, i.EvaluationVerdict, i.EvaluationScore,
-                            i.Comment, i.Timestamp, versions[key], True))
+        prev = newest.get(key)
+        if prev is not None and unchanged(prev, i.EvaluationVerdict, i.EvaluationScore, i.Comment):
+            continue
+        e = Entry(i.ID, i.UserID, i.EvaluationCheckID, i.EvaluationVerdict, i.EvaluationScore,
+                  i.Comment, i.Timestamp, (prev.version if prev else 0) + 1, True)
+        newest[key] = e
+        result.append(e)
 
     result.sort(key=lambda e: (e.timestamp, e.version))
     last: dict[tuple[str, str], Entry] = {}
@@ -108,6 +120,16 @@ def entries(session: Session, id_gronos_new: int) -> list[Entry]:
             e.previous_verdict, e.previous_score = prev.verdict, prev.score
         last[(e.user_id, e.evaluation_check_id)] = e
     return result
+
+
+def unchanged(prev: Entry, verdict: str, score: float | None, comment: str | None) -> bool:
+    """Delta rule of BronzeToGold (Input Orchestration ``writer.input_unchanged``):
+    same verdict and score as the newest entry and no new comment."""
+    return (
+        verdict == prev.verdict
+        and (None if score is None else float(score)) == (None if prev.score is None else float(prev.score))
+        and (not comment or comment == prev.comment)
+    )
 
 
 def current(all_entries: list[Entry]) -> list[Entry]:
@@ -125,6 +147,17 @@ def action_of(e: Entry) -> str:
     if (e.previous_verdict, e.previous_score) != (e.verdict, e.score):
         return "changed"
     return "commented"
+
+
+def evaluated_tickets(session: Session, user_id: str) -> list[int]:
+    """``id_gronos_new`` of all requests the user has evaluated (Gold or pending)."""
+    gold = (select(GridConnectionRequest.id_gronos_new)
+            .join(RequestEvaluationCheck, RequestEvaluationCheck.GridConnectionRequestID == GridConnectionRequest.ID)
+            .where(RequestEvaluationCheck.UserID == user_id))
+    bronze = (select(GridConnectionRequest.id_gronos_new)
+              .join(UserEvaluationInput, UserEvaluationInput.GridConnectionRequestID == GridConnectionRequest.ID)
+              .where(UserEvaluationInput.UserID == user_id))
+    return sorted({t for t in session.scalars(gold.union(bronze)) if t is not None})
 
 
 def evaluators(session: Session) -> list[User]:

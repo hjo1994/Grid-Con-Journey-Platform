@@ -17,6 +17,7 @@ from app.evaluation import (
     action_of,
     current,
     entries,
+    evaluated_tickets,
     evaluators,
     sub_criterion_of_checks,
     trigger_gold_dag,
@@ -42,6 +43,8 @@ from app.schemas import (
     EvaluationState,
     HistoryEntryOut,
     SubCriterionOut,
+    UserEvaluationItem,
+    UserEvaluations,
     UserOut,
 )
 
@@ -75,6 +78,31 @@ def list_users(session: Db) -> list[UserOut]:
     """All users with their role; ``can_evaluate`` for the evaluator roles."""
     users = session.scalars(select(User).order_by(User.Role, User.Name, User.Email)).all()
     return [user_out(u) for u in users]
+
+
+@router.get("/users/{user_id}/evaluations", response_model=UserEvaluations)
+def user_evaluations(user_id: str, session: Db, response: Response) -> UserEvaluations:
+    """"Meine Bewertungen": every request the user has evaluated with their
+    current check results (Gold + pending), most recently changed first. The
+    maturity level is computed by the client from ``checks`` and the framework,
+    as in K1."""
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Unbekannte Nutzer:in")
+    items = []
+    for ticket in evaluated_tickets(session, user_id):
+        own = [e for e in entries(session, ticket) if e.user_id == user_id]
+        if not own:
+            continue
+        request = current_request(session, ticket)
+        items.append(UserEvaluationItem(
+            id_gronos_new=ticket, id_gronos_old=request.id_gronos_old,
+            generation_technology=request.GenerationTechnology, max_p=request.maxP,
+            request_status=request.RequestStatus, checks=[entry_out(e) for e in current(own)],
+            last_change=max(e.timestamp for e in own), pending=any(e.pending for e in own)))
+    items.sort(key=lambda i: i.last_change, reverse=True)
+    response.headers["Cache-Control"] = "no-store"
+    return UserEvaluations(user=user_out(user), items=items, total=len(items))
 
 
 @router.get("/evaluation-framework", response_model=list[CriterionOut])
@@ -159,7 +187,12 @@ def post_evaluation_inputs(
     x_user_id: Annotated[str | None, Header(description="Users.ID of the acting evaluator")] = None,
 ) -> EvaluationInputResult:
     """Store one or several check evaluations of the acting user (Bronze
-    UserEvaluationInputs, append-only) and trigger BronzeToGold.
+    UserEvaluationInputs, append-only) and trigger BronzeToGold. The monitoring
+    app sends everything staged until "Bewertung speichern" in one call.
+
+    Every input is stored in Bronze; ``items`` lists only those that change
+    the current state (the same delta rule BronzeToGold applies),
+    ``unchanged`` counts the rest.
 
     verdict ``fulfilled`` / ``not_fulfilled`` / ``open`` (withdraw); a comment
     with an unchanged verdict is a comment-only entry. The score is derived
@@ -185,5 +218,6 @@ def post_evaluation_inputs(
     background.add_task(trigger_gold_dag)
     return EvaluationInputResult(
         items=[entry_out(by_id[r.ID]) for r in rows if r.ID in by_id],
+        unchanged=sum(r.ID not in by_id for r in rows),
         gold_triggered=False,  # the trigger runs after the response; see logs
     )

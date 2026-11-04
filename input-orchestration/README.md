@@ -37,10 +37,18 @@ grid_con_bronze_to_gold     evaluate_requests        UserEvaluationInputs → Bu
    zusätzlich per `GRID_CON_GOLD_SCHEDULE`. Gleicht zuerst das
    Bewertungs-Framework ab (`evaluation_framework.py`, idempotent),
    verarbeitet dann alle `UserEvaluationInputs` mit `Timestamp` > dem
-   InputBronzeTimestamp des vorherigen Laufs: je Eingabe eine
-   BusinessTransaction und ein Eintrag in `RequestEvaluationChecks` mit
-   fortlaufender `Version` je Antrag (`id_gronos_new`), Nutzer:in und Check.
-   Eingaben, die nicht zum Framework passen, werden mit Warnung übersprungen.
+   InputBronzeTimestamp des vorherigen Laufs. Jede Eingabe bekommt eine
+   BusinessTransaction. Vor dem Schreiben prüft der DAG das **Delta** gegen
+   den neuesten Gold-Eintrag derselben Nutzer:in und desselben Checks
+   (`writer.input_unchanged`): Nur wenn sich Verdict oder Punkte ändern oder
+   ein neuer Kommentar dabei ist, entsteht ein Eintrag in
+   `RequestEvaluationChecks` mit fortlaufender `Version` je Antrag
+   (`id_gronos_new`), Nutzer:in und Check. Eine BusinessTransaction ohne
+   Gold-Eintrag heißt „verarbeitet, unverändert“ (`rows_unchanged` in den
+   Laufstatistiken). Eingaben, die nicht zum Framework passen, bekommen
+   ebenfalls eine BusinessTransaction und werden mit Warnung übersprungen
+   (`rows_rejected`); so rückt die Wasserlinie immer vor. Bronze bleibt
+   vollständig (append-only).
 
 **BusinessTransactions:** `Timestamp` = Zeitpunkt der Transformation Bronze →
 Silver bzw. Gold, `InputBronzeTimestamp` = Timestamp der verarbeiteten
@@ -200,10 +208,11 @@ Task-Log ausgegeben (inkl. Ticketname).
 
 ## Verifiziert (04.11.2026)
 
-21 Tests (`tests/`): Ableitung GRONOS-JSON → Silver, Präfix-Verfeinerung bei
+22 Tests (`tests/`): Ableitung GRONOS-JSON → Silver, Präfix-Verfeinerung bei
 504 inkl. Abbruch, Token-Erneuerung bei 401, Delta gegen Bronze, ein
 Timestamp je Abruf, Wasserlinie BronzeToSilver/BronzeToGold, Änderungsprüfung,
 Versionierung je Nutzer:in und Check (auch über neue Silver-Stände hinweg),
+Delta in BronzeToGold (BusinessTransaction je Eingabe, Gold nur bei Änderung),
 Framework gegen die Excel-Regeln, Umbau einer C4C-Datenbank. Alle vier DAGs
 mit Airflow 3.1 geparst; `airflow dags test` für RawToBronze → BronzeToSilver
 (gegen eine GRONOS-Attrappe) und BronzeToGold. Migration auf einer Kopie von

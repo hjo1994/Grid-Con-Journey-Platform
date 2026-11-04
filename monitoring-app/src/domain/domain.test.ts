@@ -2,6 +2,7 @@ import { buildUrl } from "../api/client";
 import { BY_STATUS, STATUSES } from "../test/fixtures";
 import { fmtInt } from "./format";
 import { c4cTicketUrl, documentHref } from "./links";
+import { hrefOf, mayLeave, parseRoute, setLeaveGuard } from "./route";
 import { groupByPhase, NO_STATUS_LABEL, OUTSIDE_LABEL, phases, progressOf, toneOf } from "./status";
 import { OTHER_LABEL, slotOf, techShares } from "./technology";
 
@@ -87,5 +88,23 @@ describe("api", () => {
 describe("format", () => {
   it("formats numbers the German way", () => {
     expect(fmtInt(52005)).toBe("52.005");
+  });
+});
+
+describe("routes", () => {
+  it("opens „Meine Bewertungen“ without a hash and keeps the other pages", () => {
+    expect(parseRoute("")).toEqual({ page: "mine" });
+    expect(parseRoute("#/meine-bewertungen")).toEqual({ page: "mine" });
+    expect(parseRoute("#/")).toEqual({ page: "overview" });
+    expect(parseRoute("#/antraege/4902/bewertung")).toEqual({ page: "evaluation", id: 4902 });
+    expect(hrefOf({ page: "mine" })).toBe("#/meine-bewertungen");
+  });
+
+  it("asks the registered guard before leaving", () => {
+    expect(mayLeave()).toBe(true);
+    setLeaveGuard(() => false);
+    expect(mayLeave()).toBe(false);
+    setLeaveGuard(null);
+    expect(mayLeave()).toBe(true);
   });
 });

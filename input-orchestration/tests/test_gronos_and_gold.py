@@ -237,6 +237,36 @@ def test_bronze_to_gold_versions_per_user_and_check(tmp_path):
     ]
 
 
+def test_bronze_to_gold_stores_only_changed_checks(tmp_path):
+    """Delta in BronzeToGold: jede Eingabe bekommt eine BusinessTransaction,
+    einen Gold-Eintrag nur, wenn sich Wert oder Kommentar ändern."""
+    db = tmp_path / "grid_con.db"
+    users, request_id = seed(db)
+    np_ = users["netzplanung"]
+
+    add_input(db, request_id, np_, "B3-04", "fulfilled", 2)
+    add_input(db, request_id, np_, "B3-04", "fulfilled", 2)                  # gleicher Wert, im selben Lauf
+    g1 = write_gold(db)
+    assert (g1.inputs, g1.business_transactions_inserted, g1.checks_inserted, g1.rows_unchanged) == (2, 2, 1, 1)
+
+    add_input(db, request_id, np_, "B3-04", "fulfilled", 2.0)                # unverändert
+    add_input(db, request_id, np_, "B3-04", "fulfilled", 2, "Trasse liegt vor")  # neuer Kommentar → Eintrag
+    add_input(db, request_id, np_, "B3-04", "fulfilled", 2, "Trasse liegt vor")  # derselbe Kommentar → keiner
+    add_input(db, request_id, np_, "B3-04", "not_fulfilled", 0)              # geänderter Wert
+    add_input(db, request_id, np_, "B3-03", "fulfilled", 5)                  # verworfen, BT trotzdem
+    g2 = write_gold(db)
+    assert (g2.inputs, g2.business_transactions_inserted, g2.checks_inserted, g2.rows_unchanged, g2.rows_rejected) \
+        == (5, 5, 2, 2, 1)
+    assert write_gold(db).inputs == 0                                        # Wasserlinie ist vorgerückt
+
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT Version, EvaluationVerdict, EvaluationComment FROM RequestEvaluationChecks "
+                       "ORDER BY Version").fetchall() == [
+        (1, "fulfilled", None), (2, "fulfilled", "Trasse liegt vor"), (3, "not_fulfilled", None)]
+    assert con.execute("SELECT COUNT(*) FROM BusinessTransactions WHERE UserEvaluationInputID IS NOT NULL").fetchone() == (7,)
+    assert con.execute("SELECT COUNT(*) FROM UserEvaluationInputs").fetchone() == (7,)  # Bronze bleibt vollständig
+
+
 def test_gold_versions_survive_new_silver_state(tmp_path):
     db = tmp_path / "grid_con.db"
     users, first_state = seed(db)

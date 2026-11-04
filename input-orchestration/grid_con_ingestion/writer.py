@@ -584,6 +584,7 @@ class GoldStats:
     inputs: int = 0
     business_transactions_inserted: int = 0
     checks_inserted: int = 0
+    rows_unchanged: int = 0
     rows_rejected: int = 0
     previous_input_bronze_timestamp: str | None = None
 
@@ -604,6 +605,20 @@ def next_input_timestamp(conn: sqlite3.Connection) -> str:
     return now.isoformat(sep=" ", timespec="microseconds")
 
 
+def input_unchanged(latest: tuple, verdict: str, score, comment: str | None) -> bool:
+    """Delta-Regel: eine Eingabe ist unverändert, wenn Verdict und Punkte dem
+    letzten Gold-Eintrag ``(verdict, score, comment)`` derselben Nutzer:in und
+    desselben Checks entsprechen und sie keinen neuen Kommentar trägt (keiner
+    oder derselbe). Ein neuer Kommentar zu gleichem Wert wird gespeichert.
+    Gegenstück im Backend: app/evaluation.py ``unchanged``."""
+    last_verdict, last_score, last_comment = latest
+    return (
+        verdict == last_verdict
+        and (None if score is None else float(score)) == (None if last_score is None else float(last_score))
+        and (not comment or comment == last_comment)
+    )
+
+
 def _valid_input(conn: sqlite3.Connection, check_id: str, verdict: str, score) -> str | None:
     """Fehlertext, falls die Eingabe nicht zum Framework passt (sonst None)."""
     from grid_con_ingestion.models import VERDICTS
@@ -622,10 +637,13 @@ def write_gold(db_path: str | Path) -> GoldStats:
     """BronzeToGold: alle UserEvaluationInputs mit ``Timestamp`` nach dem
     InputBronzeTimestamp des vorherigen Laufs → RequestEvaluationChecks.
 
-    Je Eingabe eine BusinessTransaction und ein Gold-Eintrag mit fortlaufender
-    ``Version`` je Antrag (``id_gronos_new``), Nutzer:in und Check. Das
-    Framework wird vorher abgeglichen (idempotent), damit die Config-Tabellen
-    immer zum Code passen.
+    Jede Eingabe bekommt eine BusinessTransaction (auch verworfene und
+    unveränderte, so rückt die Wasserlinie immer vor). Ein Gold-Eintrag mit fortlaufender
+    ``Version`` je Antrag (``id_gronos_new``), Nutzer:in und Check entsteht nur,
+    wenn sich die Eingabe vom letzten Gold-Eintrag unterscheidet (Delta, siehe
+    ``input_unchanged``); eine BusinessTransaction ohne Gold-Eintrag heißt
+    "verarbeitet, unverändert". Das Framework wird vorher abgeglichen
+    (idempotent), damit die Config-Tabellen immer zum Code passen.
     """
     from grid_con_ingestion.evaluation_framework import sync_framework
 
@@ -644,31 +662,36 @@ def write_gold(db_path: str | Path) -> GoldStats:
         stats.inputs = len(rows)
         now = _utcnow()
         for input_id, request_id, check_id, user_id, verdict, score, comment, ts, ticket in rows:
-            problem = _valid_input(conn, check_id, verdict, score)
-            if problem:
-                stats.rows_rejected += 1
-                log.warning("UserEvaluationInputs %s übersprungen: %s", input_id, problem)
-                continue
-            version = conn.execute(
-                "SELECT COALESCE(MAX(c.Version), 0) + 1 FROM RequestEvaluationChecks c "
-                "JOIN GridConnectionRequests r ON r.ID = c.GridConnectionRequestID "
-                "WHERE c.UserID = ? AND c.EvaluationCheckID = ? AND "
-                "(r.id_gronos_new = ? OR (? IS NULL AND r.ID = ?))",
-                (user_id, check_id, ticket, ticket, request_id),
-            ).fetchone()[0]
             bt_id = _new_id()
             conn.execute(
                 "INSERT INTO BusinessTransactions (ID, UserEvaluationInputID, Timestamp, InputBronzeTimestamp) "
                 "VALUES (?, ?, ?, ?)",
                 (bt_id, input_id, now, ts),
             )
+            stats.business_transactions_inserted += 1
+            problem = _valid_input(conn, check_id, verdict, score)
+            if problem:
+                stats.rows_rejected += 1
+                log.warning("UserEvaluationInputs %s übersprungen: %s", input_id, problem)
+                continue
+            latest = conn.execute(
+                "SELECT c.Version, c.EvaluationVerdict, c.EvaluationScore, c.EvaluationComment "
+                "FROM RequestEvaluationChecks c "
+                "JOIN GridConnectionRequests r ON r.ID = c.GridConnectionRequestID "
+                "WHERE c.UserID = ? AND c.EvaluationCheckID = ? AND "
+                "(r.id_gronos_new = ? OR (? IS NULL AND r.ID = ?)) ORDER BY c.Version DESC LIMIT 1",
+                (user_id, check_id, ticket, ticket, request_id),
+            ).fetchone()
+            if latest is not None and input_unchanged(latest[1:], verdict, score, comment):
+                stats.rows_unchanged += 1
+                continue
+            version = (latest[0] if latest else 0) + 1
             conn.execute(
                 "INSERT INTO RequestEvaluationChecks (ID, GridConnectionRequestID, UserID, EvaluationCheckID, "
                 "BusinessTransactionID, EvaluationVerdict, EvaluationScore, EvaluationComment, Version, Timestamp) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (_new_id(), request_id, user_id, check_id, bt_id, verdict, score, comment, version, ts),
             )
-            stats.business_transactions_inserted += 1
             stats.checks_inserted += 1
     return stats
 

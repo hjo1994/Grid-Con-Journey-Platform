@@ -5,11 +5,12 @@ import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, Req
 import { DetailPanel } from "./components/DetailPanel";
 import { EvaluationView } from "./components/EvaluationView";
 import { HistoryView } from "./components/HistoryView";
+import { MyEvaluationsView } from "./components/MyEvaluationsView";
 import { Pager, RequestTable } from "./components/RequestTable";
 import { ErrorNote } from "./components/small";
 import { StatusWidget, TechWidget } from "./components/Widgets";
 import { fmtShortDateTime } from "./domain/format";
-import { hrefOf, useRoute } from "./domain/route";
+import { hrefOf, mayLeave, setLeaveGuard, useRoute } from "./domain/route";
 import { groupByPhase, STOPPED_STATUS } from "./domain/status";
 import { techShares } from "./domain/technology";
 
@@ -42,7 +43,9 @@ function storedUserId(): string | null {
 }
 
 // No authentication yet (see README): the user picks who they are. The choice
-// is sent to the backend as X-User-ID when saving an evaluation.
+// is sent to the backend as X-User-ID when saving an evaluation. Picking a
+// user is the "login": it asks first if there are unsaved changes and then
+// opens "Meine Bewertungen" with that user's latest results.
 function useCurrentUser() {
   const [users, setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState<string | null>(storedUserId);
@@ -51,7 +54,10 @@ function useCurrentUser() {
   }, []);
   const me = users.find((u) => u.id === userId) ?? users.find((u) => u.can_evaluate) ?? null;
   const choose = (id: string) => {
+    if (!mayLeave()) return;
+    setLeaveGuard(null);
     setUserId(id);
+    window.location.hash = hrefOf({ page: "mine" });
     try {
       window.localStorage.setItem(USER_KEY, id);
     } catch {
@@ -73,10 +79,13 @@ export default function App() {
           GRID CON <i>Monitoring</i>
         </span>
         <nav>
+          <a href={hrefOf({ page: "mine" })} className={route.page === "mine" ? "on" : undefined}>
+            Meine Bewertungen
+          </a>
           <a href="#/" className={route.page === "overview" ? "on" : undefined}>
             Übersicht
           </a>
-          {route.page !== "overview" && (
+          {(route.page === "evaluation" || route.page === "history") && (
             <a href={hrefOf(route)} className="on">
               {route.page === "history" ? "Verlauf" : "Bewertung"}
             </a>
@@ -104,9 +113,13 @@ export default function App() {
           )}
         </span>
       </header>
-      {route.page === "evaluation" ? (
+      {route.page === "mine" ? (
         <main className="body">
-          <EvaluationView key={route.id} id={route.id} me={me} />
+          <MyEvaluationsView me={me} />
+        </main>
+      ) : route.page === "evaluation" ? (
+        <main className="body">
+          <EvaluationView key={`${route.id}-${me?.id}`} id={route.id} me={me} />
         </main>
       ) : route.page === "history" ? (
         <main className="body">

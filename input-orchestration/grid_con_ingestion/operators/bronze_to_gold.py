@@ -4,7 +4,9 @@
 Ausgelöst vom Backend, sobald eine Prüfer:in eine Bewertung speichert
 (Airflow REST API), optional zusätzlich per Zeitplan. Neue Eingaben sind alle
 mit ``Timestamp`` nach dem höchsten InputBronzeTimestamp der bisherigen
-Gold-BusinessTransactions; mehrere Auslösungen kurz hintereinander
+Gold-BusinessTransactions. Jede Eingabe bekommt eine BusinessTransaction,
+einen RequestEvaluationChecks-Eintrag nur, wenn sie sich vom letzten Gold-Stand
+unterscheidet (Delta, ``writer.input_unchanged``); mehrere Auslösungen kurz hintereinander
 verarbeiten jede Eingabe genau einmal.
 """
 from __future__ import annotations
@@ -30,6 +32,8 @@ class BronzeToGoldOperator(BaseOperator):
     def execute(self, context) -> dict:
         stats = bronze_to_gold(self.db_path)
         self.log.info("Gold geschrieben nach %s: %s", self.db_path, stats.as_dict())
+        if stats.rows_unchanged:
+            self.log.info("%d Eingabe(n) unverändert gegenüber Gold, kein neuer Eintrag", stats.rows_unchanged)
         if stats.rows_rejected:
             self.log.warning("%d Eingabe(n) passen nicht zum Framework und wurden übersprungen", stats.rows_rejected)
         return stats.as_dict()

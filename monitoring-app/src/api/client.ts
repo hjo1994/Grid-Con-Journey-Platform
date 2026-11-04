@@ -7,6 +7,7 @@ import type {
   EvaluationInputItem,
   EvaluationState,
   User,
+  UserEvaluations,
   GridConnectionRequestWithCustomer,
   Meta,
   Page,
@@ -101,6 +102,9 @@ export const api = {
 
   users: (signal?: AbortSignal) => get<User[]>("/users", undefined, signal),
 
+  userEvaluations: (userId: string, signal?: AbortSignal) =>
+    get<UserEvaluations>(`/users/${encodeURIComponent(userId)}/evaluations`, undefined, signal),
+
   framework: (signal?: AbortSignal) => get<EvaluationCriterion[]>("/evaluation-framework", undefined, signal),
 
   evaluation: (idGronosNew: number, signal?: AbortSignal) =>
@@ -110,8 +114,9 @@ export const api = {
     get<EvaluationHistory>(`/grid-connection-requests/${idGronosNew}/evaluation-history`, undefined, signal),
 
   // No authentication yet: the acting user goes in X-User-ID (see backend README).
+  // One call per "Bewertung speichern" with all changed checks.
   saveEvaluation: (idGronosNew: number, userId: string, checks: EvaluationInputItem[]) =>
-    post<{ items: EvaluationEntry[] }>(`/grid-connection-requests/${idGronosNew}/evaluation-inputs`, { checks }, { "X-User-ID": userId }),
+    post<{ items: EvaluationEntry[]; unchanged: number }>(`/grid-connection-requests/${idGronosNew}/evaluation-inputs`, { checks }, { "X-User-ID": userId }),
 
   // The request list carries only customer_id; names come from the customer
   // resource, loaded completely once (about 120 customers).

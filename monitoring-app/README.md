@@ -24,24 +24,37 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
 
 ## Bewertung: K1 und K4
 
-Hash-Routen: `#/` Übersicht, `#/antraege/<id>/bewertung` (K1),
+Hash-Routen: ohne Hash bzw. `#/meine-bewertungen` „Meine Bewertungen“
+(Startseite), `#/` Übersicht, `#/antraege/<id>/bewertung` (K1),
 `#/antraege/<id>/verlauf` (K4). Im Detailbereich führen „Reifegrad bewerten“
 und „Verlauf“ dorthin.
 
 - **Angemeldet als:** Auswahl der Nutzer:in in der Kopfzeile (bis zur
   Authentifizierung), gespeichert in `localStorage` (`gridcon.userId`),
-  gesendet als `X-User-ID`.
+  gesendet als `X-User-ID`. Die Wahl ist die „Anmeldung“: danach öffnet
+  sich „Meine Bewertungen“.
+- **Meine Bewertungen** (`src/components/MyEvaluationsView.tsx`): alle
+  Anträge, die die Nutzer:in bewertet hat, zuletzt geändert zuerst, mit dem
+  eigenen zuletzt gespeicherten Reifegrad, Zahl der bewerteten Checks und
+  letzter Änderung; ein Klick öffnet K1.
 - **K1 – Spalte je Prüfer:in:** je Bewertungsgruppe (A1, A2, B1+B2, …) eine
   Spalte pro Prüfer:in. Die eigene Spalte ist bearbeitbar (Checks aufklappen,
   erfüllt / nicht erfüllt / offen, bei D1 abgestufte Punkte), die anderen sind
   read-only. Abweichende Punktzahlen werden markiert. Begründungen je
   Unterkriterium im Seitenpanel. Fußzeile: Reifegrad je Prüfer:in und
   Spannweite.
+- **Speichern:** Klicks und Kommentare („Kommentar vormerken“) ändern nur
+  einen Entwurf; die Punktzahl rechnet sofort mit. Am Ende der Bewertung
+  stehen die Zahl der ungespeicherten Änderungen, „Verwerfen“ und
+  „Bewertung speichern“. Erst dieser Knopf sendet alle Checks, die sich vom
+  gespeicherten Stand unterscheiden, in einem Aufruf. Wer mit
+  ungespeicherten Änderungen die Seite oder die Nutzer:in wechselt, wird
+  gefragt. Der Entwurf übersteht kein Neuladen.
 - **K4 – Verlauf:** links aktueller Stand je Nutzer:in und Gruppe, rechts das
   Änderungsprotokoll (Alles / Nur Bewertungen / Nur Begründungen), mit
   Punktzahl vorher → nachher.
-- **Live:** Speichern ist optimistisch, der Stand wird alle 4 s neu geladen
-  (`src/domain/useEvaluation.ts`).
+- **Live:** der Stand wird alle 4 s neu geladen, der eigene Entwurf liegt
+  darüber und wird dabei nicht überschrieben (`src/domain/useEvaluation.ts`).
 - **Punktzahl** (`src/domain/scoring.ts`), Regeln aus der Bewertungs-Excel:
   Mindestanforderungen müssen erfüllt sein (Alternativen: eine reicht), sonst
   0; Punkte-Checks geben den höchsten erreichten Wert, gedeckelt auf das
@@ -99,9 +112,11 @@ ist gitignored und muss im Firmennetz erzeugt werden.
 
 ## Verifiziert
 
-26 Tests (04.11.2026), zusätzlich: Punkteregeln (Mindestanforderungen,
+32 Tests (04.11.2026), zusätzlich: Punkteregeln (Mindestanforderungen,
 Alternativen, Deckelung, abgestufte Punkte, Reifegrad), Abweichungen,
-Verlaufs-Replay, K1 (eigene Spalte bearbeitbar, fremde read-only, Speichern).
+Verlaufs-Replay, K1 (eigene Spalte bearbeitbar, fremde read-only, Entwurf,
+nur Delta mit Kommentaren in einem Aufruf, Verwerfen), „Meine Bewertungen“,
+Routen und Rückfrage beim Verlassen.
 Im Browser gegen eine Demo-DB mit drei Prüfer:innen geprüft.
 
 ### Früherer Stand (13.10.2026)

@@ -187,3 +187,42 @@ def test_reads_still_use_a_read_only_connection(client, db_path):
     with engine.connect() as conn:
         with pytest.raises(Exception, match="readonly"):
             conn.exec_driver_sql("DELETE FROM Users")
+
+
+def test_unchanged_inputs_are_stored_but_not_shown(client, db_path):
+    """Delta rule as in BronzeToGold: same value without a new comment changes nothing."""
+    resp = post(client, RE, {"evaluation_check_id": "B3-04", "verdict": "fulfilled"},           # = Gold g-1
+                {"evaluation_check_id": "B3-01", "verdict": "fulfilled"})
+    body = resp.json()
+    assert [i["evaluation_check_id"] for i in body["items"]] == ["B3-01"] and body["unchanged"] == 1
+    post(client, RE, {"evaluation_check_id": "B3-04", "verdict": "fulfilled", "comment": "Trasse liegt vor"})
+    post(client, RE, {"evaluation_check_id": "B3-04", "verdict": "fulfilled", "comment": "Trasse liegt vor"})
+
+    hist = client.get(f"{BASE}/4902/evaluation-history?user_id={RE}").json()
+    assert [(i["evaluation_check_id"], i["action"], i["version"]) for i in hist["items"]] == [
+        ("B3-04", "commented", 2), ("B3-01", "rated", 1), ("B3-04", "rated", 1)]
+    n = sqlite3.connect(db_path).execute("SELECT COUNT(*) FROM UserEvaluationInputs").fetchone()[0]
+    assert n == 5                                                            # Bronze keeps every input
+
+
+def test_user_evaluations_lists_own_current_results(client, db_path):
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO GridConnectionRequests (ID, id_gronos_new, id_gronos_old, GenerationTechnology, maxP, "
+                "RequestStatus, timestamp) VALUES ('r2', 5100, 'Projekt-H01', 'Wind', 120, 'Eingestellt', ?)", (str(T0),))
+    con.commit()
+    client.post(f"{BASE}/5100/evaluation-inputs", json={"checks": [{"evaluation_check_id": "D1-01", "verdict": "fulfilled",
+                                                                    "score": 2}]}, headers={"X-User-ID": RE})
+    post(client, NP, {"evaluation_check_id": "B3-04", "verdict": "fulfilled"})
+
+    body = client.get(f"/api/v1/users/{RE}/evaluations").json()
+    assert body["user"]["id"] == RE and body["total"] == 2
+    newest, older = body["items"]
+    assert (newest["id_gronos_new"], newest["id_gronos_old"], newest["generation_technology"], newest["pending"]) == \
+        (5100, "Projekt-H01", "Wind", True)
+    assert [(c["evaluation_check_id"], c["score"]) for c in newest["checks"]] == [("D1-01", 2.0)]
+    assert (older["id_gronos_new"], older["pending"], older["last_change"]) == (4902, False, "2026-11-03T09:12:00Z")
+    assert [c["user_id"] for c in older["checks"]] == [RE]                    # only the own results
+
+    assert client.get(f"/api/v1/users/{FI}/evaluations").json() == {
+        "user": client.get("/api/v1/users").json()[0], "items": [], "total": 0}
+    assert client.get("/api/v1/users/nobody/evaluations").status_code == 404

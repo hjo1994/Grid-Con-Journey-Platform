@@ -1,12 +1,14 @@
 // K1 "Spalte je Prüfer": one column per evaluator, the own column is
 // editable, differences are marked, comments per scoring group in the side
-// panel. Scores are recalculated live from the check verdicts (domain/scoring.ts),
-// other evaluators' changes arrive by polling (domain/useEvaluation.ts).
-import { Fragment, useMemo, useState } from "react";
+// panel. Own verdicts and comments are staged and saved together with
+// "Bewertung speichern" at the end of the evaluation. Scores are recalculated
+// live from the check verdicts (domain/scoring.ts), other evaluators' changes
+// arrive by polling (domain/useEvaluation.ts).
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import type { EvaluationCheck, EvaluationEntry, User, Verdict } from "../api/types";
 import { fmtShortDateTime } from "../domain/format";
-import { hrefOf } from "../domain/route";
+import { hrefOf, setLeaveGuard } from "../domain/route";
 import {
   diverges,
   fmtPercent,
@@ -155,15 +157,28 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
       return n;
     });
 
-  const setVerdict = (check: EvaluationCheck, verdict: Verdict, score?: number) =>
-    void ev.save([{ evaluation_check_id: check.id, verdict, score: score ?? null }]);
+  const setVerdict = (check: EvaluationCheck, verdict: Verdict, score?: number) => ev.stage(check.id, verdict, score);
 
-  const sendComment = async () => {
+  const stageComment = () => {
     if (!me || !sideCheck || !draft.trim()) return;
-    const own = entryOf(me.id, sideCheck);
-    const ok = await ev.save([{ evaluation_check_id: sideCheck, verdict: own?.verdict ?? "open", score: own?.score ?? null, comment: draft.trim() }]);
-    if (ok) setDraft("");
+    ev.stageComment(sideCheck, draft);
+    setDraft("");
   };
+
+  const unsaved = ev.draft.size;
+  const stagedComments = (key: string) => [...ev.draft].filter(([id, d]) => d.comment && groupOfCheck.get(id) === key);
+
+  // unsaved changes: ask before leaving the page or closing the tab
+  useEffect(() => {
+    if (!unsaved) return;
+    setLeaveGuard(() => window.confirm("Du hast ungespeicherte Änderungen an deiner Bewertung. Verwerfen und die Seite verlassen?"));
+    const onUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      setLeaveGuard(null);
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [unsaved]);
 
   if (ev.error && !ev.state) return <ErrorNote message={ev.error} />;
 
@@ -255,7 +270,7 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
                             </span>
                           </td>
                           {columns.map((u, i) => (
-                            <td key={u.id} className={`ucol ${i === 0 && canEdit ? "mine" : ""}`}>
+                            <td key={u.id} className={`ucol ${i === 0 && canEdit ? `mine ${ev.draft.has(c.id) ? "staged" : ""}` : ""}`}>
                               {i === 0 && canEdit ? (
                                 <VerdictInput check={c} entry={entryOf(u.id, c.id)} disabled={ev.saving} onChange={(v, s) => setVerdict(c, v, s)} />
                               ) : (
@@ -290,9 +305,24 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
               </tr>
             </tfoot>
           </table>
+          {canEdit && (
+            <div className="submit-bar pad">
+              <span className={unsaved ? "warn-text" : "dim"}>
+                {unsaved ? `${unsaved} ungespeicherte ${unsaved === 1 ? "Änderung" : "Änderungen"}` : "Keine ungespeicherten Änderungen"}
+              </span>
+              <button type="button" className="ghost" disabled={!unsaved || ev.saving} onClick={ev.discard}>
+                Verwerfen
+              </button>
+              <button type="button" className="primary" disabled={!unsaved || ev.saving} onClick={() => void ev.submit()}>
+                {ev.saving ? "Wird gespeichert …" : "Bewertung speichern"}
+              </button>
+            </div>
+          )}
           <p className="note pad">
-            {canEdit ? "Deine Spalte ist bearbeitbar und farblich hinterlegt. Die anderen Spalten kannst du lesen, aber nicht ändern. " : "Du kannst die Bewertung lesen, aber nicht ändern. "}
-            Änderungen werden sofort gespeichert und sind für alle sichtbar. <span className="live">● live</span>{" "}
+            {canEdit
+              ? "Deine Spalte ist bearbeitbar und farblich hinterlegt. Die anderen Spalten kannst du lesen, aber nicht ändern. Deine Änderungen und Kommentare werden mit „Bewertung speichern“ gespeichert und sind dann für alle sichtbar. "
+              : "Du kannst die Bewertung lesen, aber nicht ändern. "}
+            <span className="live">● live</span>{" "}
             {ev.lastSync && <span className="dim">aktualisiert {ev.lastSync.toLocaleTimeString("de-DE")}</span>}
             {" · "}* Mindestanforderungen noch offen, ! Mindestanforderung nicht erfüllt.
           </p>
@@ -314,6 +344,21 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
               ))}
             </div>
             <ul className="thread">
+              {stagedComments(side.key).map(([id, d]) => (
+                <li key={`draft-${id}`} className="staged">
+                  {me && <Avatar user={me} size="s" />}
+                  <div>
+                    <div className="th">
+                      <b>{me?.role_label}</b>
+                      <span className="badge warn">nicht gespeichert</span>
+                    </div>
+                    <div className="dim small">
+                      {id} {VERDICT_LABEL[d.verdict]}
+                    </div>
+                    <p>{d.comment}</p>
+                  </div>
+                </li>
+              ))}
               {comments(side.key).map((h) => {
                 const u = userById.get(h.user_id);
                 return (
@@ -333,7 +378,7 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
                   </li>
                 );
               })}
-              {!comments(side.key).length && <li className="dim small">Noch keine Kommentare.</li>}
+              {!comments(side.key).length && !stagedComments(side.key).length && <li className="dim small">Noch keine Kommentare.</li>}
             </ul>
             {canEdit && (
               <div className="compose">
@@ -348,9 +393,10 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
                   ))}
                 </select>
                 <textarea id="ev-comment" placeholder="Begründung oder Frage an die anderen" value={draft} onChange={(e) => setDraft(e.target.value)} />
-                <button type="button" className="primary" disabled={!draft.trim() || ev.saving} onClick={() => void sendComment()}>
-                  Kommentieren
+                <button type="button" className="primary" disabled={!draft.trim() || ev.saving} onClick={stageComment}>
+                  Kommentar vormerken
                 </button>
+                <small className="dim">Wird mit „Bewertung speichern“ gespeichert.</small>
               </div>
             )}
           </aside>

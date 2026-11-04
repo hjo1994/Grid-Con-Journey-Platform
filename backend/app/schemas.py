@@ -222,5 +222,28 @@ class EvaluationInputBody(BaseModel):
 
 
 class EvaluationInputResult(BaseModel):
-    items: list[EvaluationEntryOut]
+    items: list[EvaluationEntryOut] = Field(description="Nur Eingaben, die etwas ändern (Delta)")
+    unchanged: int = Field(default=0, description="Eingaben ohne Änderung gegenüber dem aktuellen Stand")
     gold_triggered: bool = Field(description="BronzeToGold wurde über die Airflow-API angestoßen")
+
+
+class UserEvaluationItem(BaseModel):
+    id_gronos_new: int
+    id_gronos_old: str | None
+    generation_technology: str | None
+    max_p: float | None = Field(description="MW")
+    request_status: str | None
+    checks: list[EvaluationEntryOut] = Field(description="Aktueller Stand der Nutzer:in je Check")
+    last_change: datetime
+    pending: bool = Field(description="Mindestens eine Eingabe noch nicht von BronzeToGold verarbeitet")
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class UserEvaluations(BaseModel):
+    user: UserOut
+    items: list[UserEvaluationItem] = Field(description="Zuletzt geänderte zuerst")
+    total: int
