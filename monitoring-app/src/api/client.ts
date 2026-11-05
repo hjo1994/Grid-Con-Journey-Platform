@@ -5,7 +5,9 @@ import type {
   EvaluationEntry,
   EvaluationHistory,
   EvaluationInputItem,
+  EvaluationScoreSummaries,
   EvaluationState,
+  RequestEvaluationScores,
   User,
   UserEvaluations,
   GridConnectionRequestWithCustomer,
@@ -113,6 +115,14 @@ export const api = {
 
   evaluation: (idGronosNew: number, signal?: AbortSignal) =>
     get<EvaluationState>(`/grid-connection-requests/${idGronosNew}/evaluation`, undefined, signal),
+
+  // Reifegrad computed in the backend: full breakdown of one request (base of
+  // the editing view) and a compact summary of many requests (overview).
+  evaluationScores: (idGronosNew: number, signal?: AbortSignal) =>
+    get<RequestEvaluationScores>(`/grid-connection-requests/${idGronosNew}/evaluation-scores`, undefined, signal),
+
+  scoreSummaries: (ids: number[], signal?: AbortSignal) =>
+    get<EvaluationScoreSummaries>("/evaluation-scores", { ids: ids.slice(0, MAX_LIMIT).map(String) }, signal),
 
   history: (idGronosNew: number, signal?: AbortSignal) =>
     get<EvaluationHistory>(`/grid-connection-requests/${idGronosNew}/evaluation-history`, undefined, signal),

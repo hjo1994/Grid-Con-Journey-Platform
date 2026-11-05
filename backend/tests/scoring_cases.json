@@ -1,0 +1,54 @@
+{
+  "_comment": "Shared cases for the Reifegrad rules: backend/tests/test_scoring.py (app/scoring.py) and monitoring-app/src/domain/scoring.test.ts (live recompute while editing). Change both implementations together.",
+  "framework": [
+    { "id": "F", "name": "Formal", "weight": 0, "sub_criteria": [
+      { "id": "F1", "scoring_group": "F1", "max_score": 0, "checks": [
+        { "id": "F.1.1", "check_type": "minimum", "points": 0, "graded": false, "alternative_group": null } ] } ] },
+    { "id": "B", "name": "Technik", "weight": 0.5, "sub_criteria": [
+      { "id": "B1", "scoring_group": "B1+B2", "max_score": 1, "checks": [
+        { "id": "B1-01", "check_type": "minimum", "points": 0, "graded": false, "alternative_group": null } ] },
+      { "id": "B2", "scoring_group": "B1+B2", "max_score": 1, "checks": [
+        { "id": "B2-06", "check_type": "points", "points": 1, "graded": false, "alternative_group": null } ] },
+      { "id": "B3", "scoring_group": "B3", "max_score": 2, "checks": [
+        { "id": "B3-01", "check_type": "minimum", "points": 0, "graded": false, "alternative_group": null },
+        { "id": "B3-03", "check_type": "points", "points": 1, "graded": false, "alternative_group": null },
+        { "id": "B3-04", "check_type": "points", "points": 2, "graded": false, "alternative_group": null } ] } ] },
+    { "id": "C", "name": "Finanzen", "weight": 0.5, "sub_criteria": [
+      { "id": "C1", "scoring_group": "C1", "max_score": 2, "checks": [
+        { "id": "C1-01", "check_type": "minimum", "points": 0, "graded": false, "alternative_group": "M" },
+        { "id": "C1-02", "check_type": "minimum", "points": 0, "graded": false, "alternative_group": "M" },
+        { "id": "D1-01", "check_type": "points", "points": 2, "graded": true, "alternative_group": null } ] } ] }
+  ],
+  "cases": [
+    { "name": "nothing evaluated",
+      "values": {},
+      "groups": { "F1": [null, "empty"], "B1+B2": [null, "empty"], "B3": [null, "empty"], "C1": [null, "empty"] },
+      "percent": null, "complete": false },
+    { "name": "one group complete",
+      "values": { "B3-01": ["fulfilled", 0], "B3-03": ["fulfilled", 1] },
+      "groups": { "F1": [null, "empty"], "B1+B2": [null, "empty"], "B3": [1, "complete"], "C1": [null, "empty"] },
+      "percent": 16.7, "complete": false },
+    { "name": "failed minimum sets the group to 0",
+      "values": { "B3-01": ["not_fulfilled", 0], "B3-04": ["fulfilled", 2] },
+      "groups": { "F1": [null, "empty"], "B1+B2": [null, "empty"], "B3": [0, "min_failed"], "C1": [null, "empty"] },
+      "percent": 0, "complete": false },
+    { "name": "open minimum keeps the points but marks the group incomplete",
+      "values": { "B3-03": ["fulfilled", 1] },
+      "groups": { "F1": [null, "empty"], "B1+B2": [null, "empty"], "B3": [1, "incomplete"], "C1": [null, "empty"] },
+      "percent": 16.7, "complete": false },
+    { "name": "one fulfilled alternative is enough, graded points count their score",
+      "values": { "C1-01": ["not_fulfilled", 0], "C1-02": ["fulfilled", 0], "D1-01": ["fulfilled", 1] },
+      "groups": { "F1": [null, "empty"], "B1+B2": [null, "empty"], "B3": [null, "empty"], "C1": [1, "complete"] },
+      "percent": 25, "complete": false },
+    { "name": "everything fulfilled gives 100 %",
+      "values": { "F.1.1": ["fulfilled", 0], "B1-01": ["fulfilled", 0], "B2-06": ["fulfilled", 1],
+                  "B3-01": ["fulfilled", 0], "B3-03": ["fulfilled", 1], "B3-04": ["fulfilled", 2],
+                  "C1-01": ["fulfilled", 0], "D1-01": ["fulfilled", 2] },
+      "groups": { "F1": [0, "complete"], "B1+B2": [1, "complete"], "B3": [2, "complete"], "C1": [2, "complete"] },
+      "percent": 100, "complete": true },
+    { "name": "withdrawn verdicts count as open",
+      "values": { "B3-01": ["open", null], "B3-04": ["open", null] },
+      "groups": { "F1": [null, "empty"], "B1+B2": [null, "empty"], "B3": [null, "empty"], "C1": [null, "empty"] },
+      "percent": null, "complete": false }
+  ]
+}

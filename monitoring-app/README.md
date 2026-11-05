@@ -23,6 +23,13 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
   Inbetriebnahme, Koordinaten (Link auf OpenStreetMap, erst beim Klick),
   Firmen-ID und USt-IdNr. des Kunden, „Geändert in GRONOS“ und die
   GRONOS-ID. Bei Anfragen aus dem Excel-Import bleiben diese Zeilen weg.
+- **Reifegrad** (`src/components/ScoreCell.tsx`, Entwurf E): je Zeile der
+  kombinierte Reifegrad aus dem Backend (`GET /evaluation-scores`, ein Aufruf
+  je Seite) und ein Punkt je Prüfer:in: gefüllt = fertig, hell = begonnen,
+  leer = offen, orange = weicht ab. Hover oder Fokus zeigt die Werte je
+  Prüfer:in, abweichende Gruppen und Kommentare; ein Klick öffnet K1. Die
+  Spalte ist nicht sortierbar (das Backend sortiert und blättert, ohne
+  Reifegrad-Sortierung).
 - **Widgets**: *Status der Anfragen* nach Phase
   (`/aggregate?group_by=request_status`) und *Aktive Leistung nach
   Technologie* (`/aggregate?group_by=generation_technology&exclude_status=Eingestellt&split_multi=true`;
@@ -60,12 +67,18 @@ und „Verlauf“ dorthin.
 - **K4 – Verlauf:** links aktueller Stand je Nutzer:in und Gruppe, rechts das
   Änderungsprotokoll (Alles / Nur Bewertungen / Nur Begründungen), mit
   Punktzahl vorher → nachher.
-- **Live:** der Stand wird alle 4 s neu geladen, der eigene Entwurf liegt
-  darüber und wird dabei nicht überschrieben (`src/domain/useEvaluation.ts`).
-- **Punktzahl** (`src/domain/scoring.ts`), Regeln aus der Bewertungs-Excel:
-  Mindestanforderungen müssen erfüllt sein (Alternativen: eine reicht), sonst
-  0; Punkte-Checks geben den höchsten erreichten Wert, gedeckelt auf das
-  Gruppenmaximum; Reifegrad = Σ Gewicht × Punkte/Max.
+- **Laden:** K1 und K4 laden den Stand einmal beim Öffnen
+  (`GET …/evaluation-scores`, Gold + noch nicht verarbeitete Eingaben,
+  gruppiert nach Unterkriterium) und erneut nach dem Speichern oder mit
+  „Neu laden“; kein Polling (`src/domain/useEvaluation.ts`). Änderungen
+  anderer Prüfer:innen erscheinen danach.
+- **Punktzahl beim Bearbeiten** (`src/domain/scoring.ts`): aus dem geladenen
+  Stand plus dem eigenen Entwurf, mit denselben Regeln wie das Backend
+  (`backend/app/scoring.py`; gemeinsame Fälle in
+  `backend/tests/scoring_cases.json`): Mindestanforderungen müssen erfüllt
+  sein (Alternativen: eine reicht), sonst 0; Punkte-Checks geben den
+  höchsten erreichten Wert, gedeckelt auf das Gruppenmaximum; Reifegrad =
+  Σ Gewicht × Punkte/Max.
 
 ## Logik in der App (bewusst nicht im Backend)
 
@@ -137,7 +150,9 @@ ist gitignored und muss im Firmennetz erzeugt werden.
 
 ## Verifiziert
 
-34 Tests (05.11.2026), zusätzlich: Punkteregeln (Mindestanforderungen,
+46 Tests (05.11.2026), zusätzlich: Reifegrad-Spalte der Übersicht (ein
+Aufruf je Seite, Punkte, Hover), einmaliges Laden in K1, die mit dem Backend
+geteilten Punktefälle, Punkteregeln (Mindestanforderungen,
 Alternativen, Deckelung, abgestufte Punkte, Reifegrad), Abweichungen,
 Verlaufs-Replay, K1 (eigene Spalte bearbeitbar, fremde read-only, Entwurf,
 nur Delta mit Kommentaren in einem Aufruf, Verwerfen), „Meine Bewertungen“,

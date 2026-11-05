@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, ApiError, type ListQuery } from "./api/client";
-import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField, User } from "./api/types";
+import type { AggregateResult, Customer, EvaluationScoreSummary, GridConnectionRequest, RequestPage, RequestStatus, SortField, User } from "./api/types";
 import { DetailPanel } from "./components/DetailPanel";
 import { EvaluationView } from "./components/EvaluationView";
 import { HistoryView } from "./components/HistoryView";
@@ -160,6 +160,7 @@ function Overview({ onAsOf }: { onAsOf: (asOf: string | null) => void }) {
   const [listError, setListError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<GridConnectionRequest | null>(null);
+  const [scores, setScores] = useState<Map<number, EvaluationScoreSummary> | undefined>(undefined);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -198,6 +199,20 @@ function Overview({ onAsOf }: { onAsOf: (asOf: string | null) => void }) {
       });
     return () => ctrl.abort();
   }, [query]);
+
+  // Reifegrad of the visible page, one call per page (GET /evaluation-scores).
+  // Without scores the column shows "…"; the list itself does not depend on it.
+  useEffect(() => {
+    const ids = (page?.items ?? []).map((r) => r.id_gronos_new).filter((t): t is number => t !== null);
+    setScores(undefined);
+    if (!ids.length) return;
+    const ctrl = new AbortController();
+    api
+      .scoreSummaries(ids, ctrl.signal)
+      .then((s) => setScores(new Map(s.items.map((i) => [i.id_gronos_new, i]))))
+      .catch((err) => !isAbort(err) && setScores(new Map()));
+    return () => ctrl.abort();
+  }, [page]);
 
   const customers = useMemo(() => new Map((ref?.customers ?? []).map((c) => [c.id, c])), [ref]);
   const customerName = useCallback((id: string | null) => (id ? customers.get(id)?.customer_name ?? null : null), [customers]);
@@ -247,6 +262,7 @@ function Overview({ onAsOf }: { onAsOf: (asOf: string | null) => void }) {
                   selectedId={selected?.id ?? null}
                   onSelect={setSelected}
                   loading={loading}
+                  scores={scores}
                 />
                 {page && <Pager offset={query.offset} limit={query.limit} total={page.total} onPage={(offset) => setQuery((q) => ({ ...q, offset }))} />}
               </>

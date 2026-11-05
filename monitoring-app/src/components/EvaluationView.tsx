@@ -1,9 +1,11 @@
 // K1 "Spalte je Prüfer": one column per evaluator, the own column is
 // editable, differences are marked, comments per scoring group in the side
 // panel. Own verdicts and comments are staged and saved together with
-// "Bewertung speichern" at the end of the evaluation. Scores are recalculated
-// live from the check verdicts (domain/scoring.ts), other evaluators' changes
-// arrive by polling (domain/useEvaluation.ts).
+// "Bewertung speichern" at the end of the evaluation. The saved results and
+// scores are loaded once from the backend (GET …/evaluation-scores, see
+// domain/useEvaluation.ts); while the user changes checks the score is
+// recomputed from that payload plus the unsaved changes (domain/scoring.ts).
+// Other evaluators' changes appear after "Neu laden" or the next visit.
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import type { EvaluationCheck, EvaluationEntry, User, Verdict } from "../api/types";
@@ -322,8 +324,10 @@ export function EvaluationView({ id, me }: { id: number; me: User | null }) {
             {canEdit
               ? "Deine Spalte ist bearbeitbar und farblich hinterlegt. Die anderen Spalten kannst du lesen, aber nicht ändern. Deine Änderungen und Kommentare werden mit „Bewertung speichern“ gespeichert und sind dann für alle sichtbar. "
               : "Du kannst die Bewertung lesen, aber nicht ändern. "}
-            <span className="live">● live</span>{" "}
-            {ev.lastSync && <span className="dim">aktualisiert {ev.lastSync.toLocaleTimeString("de-DE")}</span>}
+            {ev.lastSync && <span className="dim">Stand {ev.lastSync.toLocaleTimeString("de-DE")}</span>}{" "}
+            <button type="button" className="lk-btn" onClick={() => void ev.reload()} disabled={ev.saving}>
+              Neu laden
+            </button>
             {" · "}* Mindestanforderungen noch offen, ! Mindestanforderung nicht erfüllt.
           </p>
         </section>

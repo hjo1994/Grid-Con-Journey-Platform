@@ -1,4 +1,7 @@
-import type { EvaluationEntry, Verdict } from "../api/types";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import type { EvaluationCriterion, EvaluationEntry, Verdict } from "../api/types";
 import { FRAMEWORK } from "../test/fixtures";
 import { diverges, groupScore, overallScore, replay, scoreFor, scoringGroups, type CheckValues } from "./scoring";
 
@@ -48,5 +51,44 @@ describe("scoring", () => {
     expect(r.get("1")).toEqual({ before: null, after: 0 });
     expect(r.get("2")).toEqual({ before: 0, after: 2 });
     expect(r.get("3")).toEqual({ before: 2, after: 0 });
+  });
+});
+
+// Same cases as the backend (backend/tests/test_scoring.py), so the live
+// recompute while editing gives the backend's numbers. Vitest runs in
+// monitoring-app/, so the path is relative to it.
+
+interface SharedCase {
+  name: string;
+  values: Record<string, [Verdict, number | null]>;
+  groups: Record<string, [number | null, string]>;
+  percent: number | null;
+  complete: boolean;
+}
+const shared = JSON.parse(readFileSync(resolve(process.cwd(), "../backend/tests/scoring_cases.json"), "utf8")) as {
+  framework: { id: string; name: string; weight: number; sub_criteria: { id: string; scoring_group: string; max_score: number; checks: EvaluationCriterion["sub_criteria"][number]["checks"] }[] }[];
+  cases: SharedCase[];
+};
+const sharedFramework: EvaluationCriterion[] = shared.framework.map((c) => ({
+  ...c,
+  sub_criteria: c.sub_criteria.map((s) => ({
+    ...s,
+    name: s.id,
+    scoring_group_name: s.scoring_group,
+    question: null,
+    checks: s.checks.map((k) => ({ ...k, description: null, document_category: null })),
+  })),
+}));
+const sharedGroups = scoringGroups(sharedFramework);
+
+describe("scoring: cases shared with the backend", () => {
+  it.each(shared.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+    const values = vals(c.values);
+    const got = Object.fromEntries(sharedGroups.map((grp) => {
+      const r = groupScore(grp, values);
+      return [grp.key, [r.score, r.status]];
+    }));
+    expect(got).toEqual(c.groups);
+    expect(overallScore(sharedFramework, sharedGroups, values)).toEqual({ percent: c.percent, complete: c.complete });
   });
 });

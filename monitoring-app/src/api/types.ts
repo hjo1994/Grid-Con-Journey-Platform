@@ -186,3 +186,89 @@ export interface UserEvaluations {
   total: number;
 }
 
+
+// Reifegrad computed in the backend (backend/app/scoring.py).
+
+/** Latest result of one check by one user, with the check's attributes. */
+export interface CheckResult extends EvaluationEntry {
+  sub_criterion_id: string;
+  check_type: "minimum" | "points";
+  points: number;
+  graded: boolean;
+  alternative_group: string | null;
+}
+
+export interface SubCriterionResult {
+  sub_criterion_id: string;
+  scoring_group: string;
+  criterion_id: string;
+  points: number | null;
+  checks: CheckResult[];
+}
+
+export type GroupStatusOut = "complete" | "incomplete" | "min_failed" | "empty";
+
+export interface GroupScoreOut {
+  scoring_group: string;
+  criterion_id: string;
+  max_score: number;
+  score: number | null;
+  status: GroupStatusOut;
+}
+
+export interface ReviewerScore {
+  user: User;
+  percent: number | null;
+  complete: boolean;
+  deviates: boolean;
+  last_change: string | null;
+  sub_criteria: SubCriterionResult[];
+  groups: GroupScoreOut[];
+}
+
+export interface CombinedScore {
+  percent: number | null;
+  method: "mean";
+  done: number;
+  total: number;
+  complete: boolean;
+  diverging_groups: string[];
+}
+
+/** GET /grid-connection-requests/{id}/evaluation-scores */
+export interface RequestEvaluationScores {
+  id_gronos_new: number;
+  last_change: string | null;
+  combined: CombinedScore;
+  reviewers: ReviewerScore[];
+}
+
+export interface ReviewerSummary {
+  user_id: string;
+  name: string | null;
+  role: string;
+  role_label: string;
+  short: string;
+  percent: number | null;
+  complete: boolean;
+  deviates: boolean;
+  last_change: string | null;
+}
+
+/** One item of GET /evaluation-scores (overview). */
+export interface EvaluationScoreSummary {
+  id_gronos_new: number;
+  percent: number | null;
+  done: number;
+  total: number;
+  complete: boolean;
+  diverging_groups: string[];
+  comment_count: number;
+  last_change: string | null;
+  reviewers: ReviewerSummary[];
+}
+
+export interface EvaluationScoreSummaries {
+  items: EvaluationScoreSummary[];
+  total: number;
+}

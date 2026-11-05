@@ -3,8 +3,10 @@
 Eigenes Deployment. Stellt die Silver-, Gold- und Config-Tabellen der
 zentralen Datenbank über eine REST-API bereit. Die Endpunkte bilden
 Ressourcen ab, keine Ansichten einer bestimmten App: Darstellungslogik
-(Prozessschritt, C4C-Deeplink, Widget-Zuschnitt, Punktzahl) rechnet der
-jeweilige Konsument. Einziger Schreibpfad: Bewertungseingaben nach Bronze
+(Prozessschritt, C4C-Deeplink, Widget-Zuschnitt) rechnet der jeweilige
+Konsument. Ausnahme ist der Reifegrad der Bewertung: ihn rechnet das Backend
+(`app/scoring.py`), damit Übersicht und Bewertungsansicht dieselben Zahlen
+zeigen. Einziger Schreibpfad: Bewertungseingaben nach Bronze
 (`UserEvaluationInputs`).
 
 Interaktive Doku: `/api/docs` (Swagger UI offline aus `swagger-ui-bundle`,
@@ -30,6 +32,8 @@ Beides ohne Anmeldung.
 | `GET /evaluation-framework` | Kriterien → Unterkriterien → Checks (Gewicht, `scoring_group`, `max_score`, `check_type`, `points`, `graded`, `alternative_group`) |
 | `GET /grid-connection-requests/{id}/evaluation` | aktueller Stand je Prüfer:in und Check (`verdict`, `score`, `comment`, `version`, `pending`) und die Prüfer:innen |
 | `GET /grid-connection-requests/{id}/evaluation-history` | Verlauf, neueste zuerst, mit Vorwert; `kind=all\|ratings\|comments`, `scoring_group`, `user_id` |
+| `GET /grid-connection-requests/{id}/evaluation-scores` | Reifegrad eines Antrags: je Prüfer:in der neueste Stand jedes Checks (Gold + noch nicht verarbeitete Eingaben) mit seinen Attributen (`check_type`, `points`, `graded`, `alternative_group`), gruppiert nach Unterkriterium (`points`, `scoring_group`), dazu Punkte und `status` je Scoring-Gruppe, `percent`, `complete`, `deviates`; `combined` = Mittelwert, `done`/`total`, `diverging_groups` |
+| `GET /evaluation-scores?ids=…` | Kurzfassung für die Übersicht, `ids` (`id_gronos_new`) mehrfach angebbar, höchstens 500: kombinierter Reifegrad, je Prüfer:in `percent`, `complete`, `deviates`, `last_change`, dazu `diverging_groups` und `comment_count`. Unbekannte ids fehlen in der Antwort |
 | `POST /grid-connection-requests/{id}/evaluation-inputs` | ein oder mehrere Checks speichern, Prüfer:in im Header `X-User-ID` (fehlt/unbekannt `401`, Rolle `viewer` `403`), ungültig `422`, sonst `201` |
 
 **Feldnamen:** die Silver-Spalten in snake_case (`RequestStatus` →
@@ -83,6 +87,16 @@ die Doku nicht. Gesteuert über `EG_AUTH_DEV_MODE` und `EG_AUTH_DEV_GROUPS`
   nach der Gold-Wasserlinie (`pending: true`), mit derselben Delta-Regel wie
   der DAG (gleicher Wert ohne neuen Kommentar zählt nicht). Eine gespeicherte
   Bewertung ist sofort für alle sichtbar.
+- **Reifegrad** (`app/scoring.py`) aus diesem Stand und den Config-Tabellen:
+  Mindestanforderungen müssen erfüllt sein (Alternativen derselben
+  `AlternativeGroup`: eine reicht), sonst 0; Punkte-Checks geben den höchsten
+  erreichten Wert, gedeckelt auf `MaxScore` der Scoring-Gruppe; Reifegrad =
+  Σ Gewicht × Punkte/Max in Prozent mit einer Nachkommastelle. Kombiniert =
+  Mittelwert der Prüfer:innen mit Ergebnis. Abweichend ist eine Gruppe, wenn
+  die Prüfer:innen, die sie gewertet haben, unterschiedliche Punkte geben;
+  `deviates` trifft, wer dort vom häufigsten Wert abweicht (ohne eindeutigen
+  häufigsten Wert alle). Die Monitoring-App rechnet beim Bearbeiten
+  dieselben Regeln lokal nach; beide laufen gegen `tests/scoring_cases.json`.
 
 | Variable | Zweck |
 |---|---|

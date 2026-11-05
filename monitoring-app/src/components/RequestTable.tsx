@@ -1,6 +1,7 @@
-import type { GridConnectionRequest, RequestStatus, SortField, SortOrder } from "../api/types";
+import type { EvaluationScoreSummary, GridConnectionRequest, RequestStatus, SortField, SortOrder } from "../api/types";
 import { fmtMW } from "../domain/format";
 import { slotOf, type TechShare } from "../domain/technology";
+import { ScoreCell } from "./ScoreCell";
 import { StatusPill, TechLabel } from "./small";
 
 const COLUMNS: { key: SortField; label: string; right?: boolean }[] = [
@@ -23,9 +24,11 @@ interface Props {
   selectedId: string | null;
   onSelect: (row: GridConnectionRequest) => void;
   loading: boolean;
+  /** Reifegrad per id_gronos_new (GET /evaluation-scores); undefined while loading */
+  scores?: Map<number, EvaluationScoreSummary>;
 }
 
-export function RequestTable({ rows, customerName, catalogue, techs, sort, order, onSort, selectedId, onSelect, loading }: Props) {
+export function RequestTable({ rows, customerName, catalogue, techs, sort, order, onSort, selectedId, onSelect, loading, scores }: Props) {
   return (
     <div className="tw" aria-busy={loading}>
       <table>
@@ -43,6 +46,8 @@ export function RequestTable({ rows, customerName, catalogue, techs, sort, order
                 </button>
               </th>
             ))}
+            {/* not sortable: the list is sorted and paged in the backend, which has no score sort yet */}
+            <th className="score-col">Reifegrad</th>
           </tr>
         </thead>
         <tbody>
@@ -70,11 +75,14 @@ export function RequestTable({ rows, customerName, catalogue, techs, sort, order
               <td>
                 <StatusPill status={r.request_status} catalogue={catalogue} />
               </td>
+              <td className="score-col">
+                <ScoreCell ticket={r.id_gronos_new} summary={r.id_gronos_new !== null ? scores?.get(r.id_gronos_new) : undefined} loaded={!!scores} />
+              </td>
             </tr>
           ))}
           {!rows.length && !loading && (
             <tr>
-              <td colSpan={COLUMNS.length} className="empty">
+              <td colSpan={COLUMNS.length + 1} className="empty">
                 Keine Anfragen für diese Suche.
               </td>
             </tr>

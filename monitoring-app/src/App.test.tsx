@@ -31,6 +31,48 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+const SCORES = {
+  total: 1,
+  items: [{
+    id_gronos_new: 1001, percent: 57.5, done: 1, total: 3, complete: false, diverging_groups: ["B3"], comment_count: 2,
+    last_change: "2026-11-02T18:05:00Z",
+    reviewers: [
+      { user_id: "u-np", name: "J. H.", role: "netzplanung", role_label: "Netzplanung", short: "NP", percent: 55, complete: true, deviates: true, last_change: "2026-11-01T10:12:00Z" },
+      { user_id: "u-re", name: "A. B.", role: "flaechen_recht", role_label: "Flächen & Recht", short: "RE", percent: 60, complete: false, deviates: true, last_change: "2026-11-02T18:05:00Z" },
+      { user_id: "u-fi", name: "M. K.", role: "finanzen", role_label: "Finanzen", short: "FI", percent: null, complete: false, deviates: false, last_change: null },
+    ],
+  }, {
+    id_gronos_new: 1002, percent: null, done: 0, total: 3, complete: false, diverging_groups: [], comment_count: 0, last_change: null, reviewers: [],
+  }],
+};
+
+describe("Reifegrad in the overview", () => {
+  it("asks once for the visible page and shows score, dots and the evaluators on hover", async () => {
+    const fetch = mockFetch((url) => (url.pathname.endsWith("/evaluation-scores") ? { status: 200, body: SCORES } : ok(url)));
+    render(<App />);
+    const score = await screen.findByRole("link", { name: /^Reifegrad 58 %/ });
+    expect(score).toHaveAttribute("href", "#/antraege/1001/bewertung");
+    expect(score).toHaveAccessibleName("Reifegrad 58 %, NP weicht ab, RE weicht ab, FI offen");
+    expect(screen.getByText("nicht bewertet")).toBeInTheDocument();
+    const calls = fetch.mock.calls.map(([u]) => decodeURIComponent(String(u))).filter((u) => u.includes("/evaluation-scores"));
+    expect(calls).toEqual(["/api/v1/evaluation-scores?ids=1001&ids=1002"]);
+
+    await userEvent.hover(score);
+    const pop = screen.getByRole("tooltip");
+    expect(within(pop).getByText("Reifegrad 58 %")).toBeInTheDocument();
+    expect(within(pop).getByText("55 %")).toBeInTheDocument();
+    expect(within(pop).getByText("offen")).toBeInTheDocument();
+    expect(within(pop).getByText("1 Gruppe abweichend (B3) · 2 Kommentare")).toBeInTheDocument();
+  });
+
+  it("keeps the list usable when the scores cannot be loaded", async () => {
+    mockFetch(ok);
+    render(<App />);
+    expect(await screen.findByRole("cell", { name: "Unternehmen-B" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByLabelText("Reifegrad nicht verfügbar")).toHaveLength(2));
+  });
+});
+
 describe("App", () => {
   it("shows the list with customer names and the first request in the detail panel", async () => {
     mockFetch(ok);

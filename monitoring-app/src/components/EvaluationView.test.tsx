@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { EvaluationEntry, EvaluationState, User } from "../api/types";
+import type { EvaluationEntry, RequestEvaluationScores, User } from "../api/types";
 import { FRAMEWORK } from "../test/fixtures";
 import { EvaluationView } from "./EvaluationView";
 import { HistoryView } from "./HistoryView";
@@ -12,6 +12,26 @@ const RE: User = { id: "u-re", email: "re@x", name: "A. Becker", role: "flaechen
 const entry = (user: string, check: string, verdict: EvaluationEntry["verdict"], score: number | null, comment: string | null = null): EvaluationEntry => ({
   id: `${user}-${check}-${verdict}`, user_id: user, evaluation_check_id: check, verdict, score, comment, version: 1, timestamp: "2026-11-03T09:12:00Z", pending: false,
 });
+
+// GET …/evaluation-scores as the backend returns it: per evaluator the latest
+// check results grouped by sub-criterion (the computed sums are not used by
+// the view, which recomputes them from the checks).
+function scoresOf(evaluators: User[], entries: EvaluationEntry[]): RequestEvaluationScores {
+  return {
+    id_gronos_new: 4902,
+    last_change: null,
+    combined: { percent: null, method: "mean", done: 0, total: evaluators.length, complete: false, diverging_groups: [] },
+    reviewers: evaluators.map((user) => ({
+      user, percent: null, complete: false, deviates: false, last_change: null, groups: [],
+      sub_criteria: FRAMEWORK.flatMap((c) => c.sub_criteria.map((sc) => ({
+        sub_criterion_id: sc.id, scoring_group: sc.scoring_group, criterion_id: c.id, points: null,
+        checks: sc.checks.flatMap((k) => entries.filter((e) => e.user_id === user.id && e.evaluation_check_id === k.id).map((e) => ({
+          ...e, sub_criterion_id: sc.id, check_type: k.check_type, points: k.points, graded: k.graded, alternative_group: k.alternative_group,
+        }))),
+      }))),
+    })),
+  };
+}
 
 function setup(checks: EvaluationEntry[]) {
   let current = [...checks];
@@ -29,10 +49,7 @@ function setup(checks: EvaluationEntry[]) {
       return json({ items: [] }, 201);
     }
     if (url.pathname.endsWith("/evaluation-framework")) return json(FRAMEWORK);
-    if (url.pathname.endsWith("/evaluation")) {
-      const state: EvaluationState = { id_gronos_new: 4902, grid_connection_request_id: "r1", evaluators: [ME, RE], checks: current, last_change: null };
-      return json(state);
-    }
+    if (url.pathname.endsWith("/evaluation-scores")) return json(scoresOf([ME, RE], current));
     if (url.pathname.endsWith("/evaluation-history"))
       return json({ id_gronos_new: 4902, total: 1, items: [{ ...entry(RE.id, "B3-04", "not_fulfilled", 0, "Wegerechte fehlen"), action: "changed", previous_verdict: "fulfilled", previous_score: 2, sub_criterion_id: "B3", scoring_group: "B3" }] });
     if (url.pathname.endsWith("/4902")) return json({ id_gronos_old: "Projekt-G02", generation_technology: "Wind", max_p: 300, customer: { customer_name: "Unternehmen-101" } });
@@ -98,6 +115,18 @@ describe("K1 evaluation", () => {
       { evaluation_check_id: "B3-04", verdict: "not_fulfilled", score: null },
       { evaluation_check_id: "B3-01", verdict: "fulfilled", score: null, comment: "Trasse geprüft" },
     ] } });
+  });
+
+  it("loads the scores once and again only after saving or „Neu laden“", async () => {
+    setup([entry(ME.id, "B3-01", "fulfilled", 0)]);
+    const fetch = vi.mocked(globalThis.fetch);
+    render(<EvaluationView id={4902} me={ME} />);
+    await screen.findByText("Reifegrad gesamt");
+    const loads = () => fetch.mock.calls.filter(([u]) => String(u).includes("/evaluation-scores")).length;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(loads()).toBe(1);
+    await userEvent.click(screen.getByRole("button", { name: "Neu laden" }));
+    await waitFor(() => expect(loads()).toBe(2));
   });
 
   it("discards staged changes", async () => {

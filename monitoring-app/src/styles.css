@@ -284,3 +284,25 @@ button.ghost:disabled { opacity: .5; cursor: default; }
   color: var(--warn, #b45309);
   font-size: 12px;
 }
+
+/* Reifegrad in the overview (design E, components/ScoreCell.tsx) */
+th.score-col { padding: 7px 8px; white-space: nowrap; }
+td.score-col { white-space: nowrap; }
+.sc { display: inline-flex; align-items: center; gap: 8px; }
+.sc .score { font-family: var(--f-mono); font-weight: 600; color: var(--fg); text-decoration: none; }
+.sc .score:hover { text-decoration: underline; }
+.sc .score.prov { color: var(--fg2); font-weight: 500; }
+.dots { display: inline-flex; gap: 3px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; box-sizing: border-box; background: var(--ok); }
+.dot.partial { background: color-mix(in srgb, var(--ok) 40%, var(--panel)); }
+.dot.open { background: transparent; border: 1.5px solid var(--fg3); }
+.dot.dev { background: var(--warn); }
+.openb { font-size: 11.5px; color: var(--fg3); border: 1px dashed var(--line); border-radius: 9px; padding: 0 8px; white-space: nowrap; }
+.score-pop { position: fixed; z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(20, 26, 34, .16); padding: 10px 12px; display: grid; gap: 6px; font-size: 12.5px; min-width: 240px; max-width: 320px; white-space: normal; }
+.score-pop table { border-collapse: collapse; font-size: 12px; }
+.score-pop td { padding: 2px 6px 2px 0; border: 0; white-space: nowrap; }
+.score-pop .dot { vertical-align: middle; }
+.lk-btn { all: unset; cursor: pointer; color: var(--accent); font-size: 12px; text-decoration: underline; }
+.lk-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lk-btn:disabled { color: var(--fg3); cursor: default; }
+.score-pop tr, .score-pop tr:hover { background: none; }

@@ -252,3 +252,107 @@ class UserEvaluations(BaseModel):
     items: list[UserEvaluationItem] = Field(description="Zuletzt geänderte zuerst")
     total: int
 
+
+
+# --------------------------------------------------------------------------- #
+# Evaluation scores (Reifegrad), computed in the backend (app/scoring.py)
+# --------------------------------------------------------------------------- #
+class CheckResultOut(EvaluationEntryOut):
+    """Latest result of one check by one user, with the check's attributes."""
+
+    sub_criterion_id: str
+    check_type: str = Field(description="minimum = Mindestanforderung, points = bringt Punkte")
+    points: int
+    graded: bool
+    alternative_group: str | None
+
+
+class SubCriterionResultOut(BaseModel):
+    sub_criterion_id: str
+    scoring_group: str = Field(description="Scoring-Gruppe, in der das Unterkriterium gewertet wird (z. B. B1+B2)")
+    criterion_id: str
+    points: float | None = Field(description="Höchste Punktzahl der erfüllten Punkte-Checks; null = nichts bewertet")
+    checks: list[CheckResultOut] = Field(description="Neuester Stand je Check (Gold + noch nicht verarbeitete Eingaben)")
+
+
+class GroupScoreOut(BaseModel):
+    scoring_group: str
+    criterion_id: str
+    max_score: int
+    score: float | None = Field(description="Nach Deckel und Mindestanforderung; null = nichts bewertet")
+    status: Literal["complete", "incomplete", "min_failed", "empty"]
+
+
+class ReviewerScoreOut(BaseModel):
+    user: UserOut
+    percent: float | None = Field(description="Reifegrad in Prozent; null = nichts bewertet")
+    complete: bool = Field(description="Alle Gruppen vollständig bewertet")
+    deviates: bool = Field(description="Weicht in mindestens einer abweichenden Gruppe von den anderen ab")
+    last_change: datetime | None
+    sub_criteria: list[SubCriterionResultOut]
+    groups: list[GroupScoreOut]
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class CombinedScoreOut(BaseModel):
+    percent: float | None = Field(description="Mittelwert der Prüfer:innen mit Ergebnis")
+    method: Literal["mean"] = "mean"
+    done: int = Field(description="Prüfer:innen mit vollständiger Bewertung")
+    total: int = Field(description="Prüfer:innen insgesamt")
+    complete: bool
+    diverging_groups: list[str] = Field(description="Gruppen, in denen die Prüfer:innen unterschiedlich werten")
+
+
+class RequestEvaluationScores(BaseModel):
+    id_gronos_new: int
+    last_change: datetime | None
+    combined: CombinedScoreOut
+    reviewers: list[ReviewerScoreOut] = Field(description="Alle bewertenden Rollen, in Rollenreihenfolge")
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class ReviewerSummaryOut(BaseModel):
+    user_id: str
+    name: str | None
+    role: str
+    role_label: str
+    short: str = Field(description="Kürzel der Rolle (NP, RE, FI)")
+    percent: float | None
+    complete: bool
+    deviates: bool
+    last_change: datetime | None
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class EvaluationScoreSummary(BaseModel):
+    id_gronos_new: int
+    percent: float | None = Field(description="Mittelwert der Prüfer:innen mit Ergebnis; null = nicht bewertet")
+    done: int
+    total: int
+    complete: bool
+    diverging_groups: list[str]
+    comment_count: int = Field(description="Kommentare aller Prüfer:innen")
+    last_change: datetime | None
+    reviewers: list[ReviewerSummaryOut]
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class EvaluationScoreSummaries(BaseModel):
+    items: list[EvaluationScoreSummary] = Field(description="In der Reihenfolge der angefragten ids; unbekannte fehlen")
+    total: int

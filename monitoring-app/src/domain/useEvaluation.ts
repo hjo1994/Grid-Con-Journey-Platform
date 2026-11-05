@@ -1,16 +1,38 @@
-// Loads framework, current evaluation and history of one request and keeps
-// them live: polls every POLL_MS. The user's own changes are staged in a
-// draft (verdicts and comments) and only sent with submit() ("Bewertung
-// speichern"), as one call with the checks that differ from the user's latest
-// saved state. The draft is shown on top of the saved state, so the score is
-// recalculated on the click; polling never overwrites it.
+// Loads framework, evaluation scores and history of one request once when the
+// view opens (no polling). The scores come from the backend
+// (GET …/evaluation-scores: per evaluator the latest result of every check,
+// Gold + not yet processed inputs, grouped by sub-criterion). The user's own
+// changes are staged in a draft (verdicts and comments) and only sent with
+// submit() ("Bewertung speichern"), as one call with the checks that differ
+// from the user's latest saved state. The draft is laid over the loaded
+// results, and the view recomputes the score from both (domain/scoring.ts).
+// After saving, and on reload(), the data is loaded again.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, ApiError } from "../api/client";
-import type { EvaluationCheck, EvaluationCriterion, EvaluationEntry, EvaluationHistory, EvaluationInputItem, EvaluationState, Verdict } from "../api/types";
+import type { EvaluationCheck, EvaluationCriterion, EvaluationEntry, EvaluationHistory, EvaluationInputItem, RequestEvaluationScores, User, Verdict } from "../api/types";
 import { scoreFor, scoringGroups } from "./scoring";
 
-export const POLL_MS = 4000;
+/** Saved state as loaded: evaluators and the latest entry per evaluator and check. */
+export interface SavedState {
+  evaluators: User[];
+  checks: EvaluationEntry[];
+  last_change: string | null;
+}
+
+export function savedState(scores: RequestEvaluationScores): SavedState {
+  return {
+    evaluators: scores.reviewers.map((r) => r.user),
+    checks: scores.reviewers.flatMap((r) =>
+      r.sub_criteria.flatMap((s) =>
+        s.checks.map(({ id, user_id, evaluation_check_id, verdict, score, comment, version, timestamp, pending }) => ({
+          id, user_id, evaluation_check_id, verdict, score, comment, version, timestamp, pending,
+        })),
+      ),
+    ),
+    last_change: scores.last_change,
+  };
+}
 
 /** One staged check: verdict, the chosen points of graded checks, an optional comment. */
 export interface DraftItem {
@@ -21,7 +43,9 @@ export interface DraftItem {
 
 export interface EvaluationData {
   framework: EvaluationCriterion[] | null;
-  state: EvaluationState | null;
+  /** Backend scores as loaded (without the draft). */
+  scores: RequestEvaluationScores | null;
+  state: SavedState | null;
   history: EvaluationHistory | null;
   /** Current entries incl. the user's staged (unsaved) changes. */
   entries: EvaluationEntry[];
@@ -34,6 +58,7 @@ export interface EvaluationData {
   stageComment: (checkId: string, comment: string) => void;
   discard: () => void;
   submit: () => Promise<boolean>;
+  reload: () => Promise<void>;
 }
 
 const errorText = (err: unknown) => (err instanceof ApiError ? err.message : "Unerwarteter Fehler beim Laden der Daten.");
@@ -47,7 +72,7 @@ function changes(check: EvaluationCheck | undefined, item: DraftItem, saved: Eva
 
 export function useEvaluation(idGronosNew: number, userId: string | null): EvaluationData {
   const [framework, setFramework] = useState<EvaluationCriterion[] | null>(null);
-  const [state, setState] = useState<EvaluationState | null>(null);
+  const [scores, setScores] = useState<RequestEvaluationScores | null>(null);
   const [history, setHistory] = useState<EvaluationHistory | null>(null);
   const [draft, setDraft] = useState<Map<string, DraftItem>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -57,9 +82,9 @@ export function useEvaluation(idGronosNew: number, userId: string | null): Evalu
 
   const refresh = useCallback(async () => {
     try {
-      const [s, h] = await Promise.all([api.evaluation(idGronosNew), api.history(idGronosNew)]);
+      const [s, h] = await Promise.all([api.evaluationScores(idGronosNew), api.history(idGronosNew)]);
       if (!alive.current) return;
-      setState(s);
+      setScores(s);
       setHistory(h);
       setLastSync(new Date());
       setError(null);
@@ -72,12 +97,12 @@ export function useEvaluation(idGronosNew: number, userId: string | null): Evalu
     alive.current = true;
     api.framework().then((f) => alive.current && setFramework(f)).catch((err) => alive.current && setError(errorText(err)));
     void refresh();
-    const t = setInterval(() => void refresh(), POLL_MS);
     return () => {
       alive.current = false;
-      clearInterval(t);
     };
   }, [refresh]);
+
+  const state = useMemo(() => (scores ? savedState(scores) : null), [scores]);
 
   // a draft belongs to one user
   useEffect(() => setDraft(new Map()), [userId]);
@@ -167,5 +192,5 @@ export function useEvaluation(idGronosNew: number, userId: string | null): Evalu
     return [...base.filter((e) => !(e.user_id === userId && draft.has(e.evaluation_check_id))), ...staged];
   }, [state, draft, userId, checksById]);
 
-  return { framework, state, history, entries, draft, error, saving, lastSync, stage, stageComment, discard, submit };
+  return { framework, scores, state, history, entries, draft, error, saving, lastSync, stage, stageComment, discard, submit, reload: refresh };
 }

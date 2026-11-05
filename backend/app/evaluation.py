@@ -78,48 +78,59 @@ def gold_watermark(session: Session) -> datetime | None:
 def entries(session: Session, id_gronos_new: int) -> list[Entry]:
     """All evaluation entries of a request in chronological order, with
     version and previous value per (user, check)."""
-    ids = state_ids(session, id_gronos_new)
-    if not ids:
-        return []
+    return entries_for(session, [id_gronos_new]).get(id_gronos_new, [])
+
+
+def entries_for(session: Session, tickets: list[int]) -> dict[int, list[Entry]]:
+    """``entries`` for several requests with one query per table (overview)."""
+    ticket_of = dict(session.execute(
+        select(GridConnectionRequest.ID, GridConnectionRequest.id_gronos_new)
+        .where(GridConnectionRequest.id_gronos_new.in_(tickets))
+    ).all())
+    if not ticket_of:
+        return {}
+    ids = list(ticket_of)
     gold = session.scalars(
         select(RequestEvaluationCheck)
         .where(RequestEvaluationCheck.GridConnectionRequestID.in_(ids))
         .order_by(RequestEvaluationCheck.Timestamp, RequestEvaluationCheck.Version)
     ).all()
-    result = [
-        Entry(g.ID, g.UserID, g.EvaluationCheckID, g.EvaluationVerdict, g.EvaluationScore,
-              g.EvaluationComment, g.Timestamp, g.Version, False)
-        for g in gold
-    ]
+    result: dict[int, list[Entry]] = {}
+    newest: dict[tuple[int, str, str], Entry] = {}
+    for g in gold:
+        ticket = ticket_of[g.GridConnectionRequestID]
+        e = Entry(g.ID, g.UserID, g.EvaluationCheckID, g.EvaluationVerdict, g.EvaluationScore,
+                  g.EvaluationComment, g.Timestamp, g.Version, False)
+        result.setdefault(ticket, []).append(e)
+        key = (ticket, e.user_id, e.evaluation_check_id)
+        if key not in newest or e.version > newest[key].version:
+            newest[key] = e
     mark = gold_watermark(session)
     pending_q = select(UserEvaluationInput).where(UserEvaluationInput.GridConnectionRequestID.in_(ids))
     if mark is not None:
         pending_q = pending_q.where(UserEvaluationInput.Timestamp > mark)
     valid_checks = set(session.scalars(select(EvaluationCheck.ID)))
-    newest: dict[tuple[str, str], Entry] = {}
-    for e in result:
-        key = (e.user_id, e.evaluation_check_id)
-        if key not in newest or e.version > newest[key].version:
-            newest[key] = e
     for i in session.scalars(pending_q.order_by(UserEvaluationInput.Timestamp)).all():
         if i.EvaluationCheckID not in valid_checks:
             continue
-        key = (i.UserID, i.EvaluationCheckID)
+        ticket = ticket_of[i.GridConnectionRequestID]
+        key = (ticket, i.UserID, i.EvaluationCheckID)
         prev = newest.get(key)
         if prev is not None and unchanged(prev, i.EvaluationVerdict, i.EvaluationScore, i.Comment):
             continue
         e = Entry(i.ID, i.UserID, i.EvaluationCheckID, i.EvaluationVerdict, i.EvaluationScore,
                   i.Comment, i.Timestamp, (prev.version if prev else 0) + 1, True)
         newest[key] = e
-        result.append(e)
+        result.setdefault(ticket, []).append(e)
 
-    result.sort(key=lambda e: (e.timestamp, e.version))
-    last: dict[tuple[str, str], Entry] = {}
-    for e in result:
-        prev = last.get((e.user_id, e.evaluation_check_id))
-        if prev is not None:
-            e.previous_verdict, e.previous_score = prev.verdict, prev.score
-        last[(e.user_id, e.evaluation_check_id)] = e
+    for items in result.values():
+        items.sort(key=lambda e: (e.timestamp, e.version))
+        last: dict[tuple[str, str], Entry] = {}
+        for e in items:
+            prev = last.get((e.user_id, e.evaluation_check_id))
+            if prev is not None:
+                e.previous_verdict, e.previous_score = prev.verdict, prev.score
+            last[(e.user_id, e.evaluation_check_id)] = e
     return result
 
 

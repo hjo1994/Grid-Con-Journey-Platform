@@ -20,6 +20,7 @@ from app.evaluation import (
     action_of,
     current,
     entries,
+    entries_for,
     evaluated_tickets,
     evaluators,
     sub_criterion_of_checks,
@@ -36,16 +37,36 @@ from app.models import (
 )
 from app.models import GridConnectionRequest as Request
 from app.queries import latest_condition
+from app.scoring import (
+    Framework,
+    best_points,
+    combined_percent,
+    deviates,
+    diverging_groups,
+    group_score,
+    load_framework,
+    overall_score,
+    short_of,
+)
 from app.schemas import (
     CheckOut,
+    CheckResultOut,
+    CombinedScoreOut,
     CriterionOut,
     EvaluationEntryOut,
     EvaluationHistory,
     EvaluationInputBody,
     EvaluationInputResult,
+    EvaluationScoreSummaries,
+    EvaluationScoreSummary,
     EvaluationState,
+    GroupScoreOut,
     HistoryEntryOut,
+    RequestEvaluationScores,
+    ReviewerScoreOut,
+    ReviewerSummaryOut,
     SubCriterionOut,
+    SubCriterionResultOut,
     UserEvaluationItem,
     UserEvaluations,
     UserOut,
@@ -142,6 +163,94 @@ def evaluation_state(id_gronos_new: int, session: Db, response: Response) -> Eva
         checks=[entry_out(e) for e in current(all_entries)],
         last_change=max((e.timestamp for e in all_entries), default=None),
     )
+
+
+def request_scores(fw: Framework, users: list[User], ticket: int, all_entries) -> RequestEvaluationScores:
+    """Scores of one request from its entries (Gold + pending), see app/scoring.py."""
+    latest = [e for e in current(all_entries) if e.evaluation_check_id in fw.checks]
+    group_results = []
+    reviewers = []
+    for u in users:
+        own = [e for e in latest if e.user_id == u.ID]
+        values = {e.evaluation_check_id: (e.verdict, e.score) for e in own}
+        results = {g.key: group_score(g, values) for g in fw.groups}
+        percent, complete = overall_score(fw, results)
+        by_check = {e.evaluation_check_id: e for e in own}
+        subs = []
+        for s in fw.sub_criteria:
+            checks = [CheckResultOut(**entry_out(by_check[c.id]).model_dump(), sub_criterion_id=s.id,
+                                     check_type=c.check_type, points=c.points, graded=c.graded,
+                                     alternative_group=c.alternative_group)
+                      for c in s.checks if c.id in by_check]
+            subs.append(SubCriterionResultOut(sub_criterion_id=s.id, scoring_group=s.scoring_group,
+                                              criterion_id=s.criterion_id, points=best_points(s.checks, values),
+                                              checks=checks))
+        times = [e.timestamp for e in all_entries if e.user_id == u.ID]
+        group_results.append(results)
+        reviewers.append(ReviewerScoreOut(
+            user=user_out(u), percent=percent, complete=complete, deviates=False,
+            last_change=max(times, default=None), sub_criteria=subs,
+            groups=[GroupScoreOut(scoring_group=g.key, criterion_id=g.criterion_id, max_score=g.max_score,
+                                  score=results[g.key].score, status=results[g.key].status) for g in fw.groups]))
+    diverging = diverging_groups(fw, group_results)
+    for r, flag in zip(reviewers, deviates(diverging, group_results)):
+        r.deviates = flag
+    done = sum(r.complete for r in reviewers)
+    return RequestEvaluationScores(
+        id_gronos_new=ticket,
+        last_change=max((e.timestamp for e in all_entries), default=None),
+        combined=CombinedScoreOut(percent=combined_percent([r.percent for r in reviewers]), done=done,
+                                  total=len(reviewers), complete=bool(reviewers) and done == len(reviewers),
+                                  diverging_groups=diverging),
+        reviewers=reviewers,
+    )
+
+
+@router.get("/grid-connection-requests/{id_gronos_new}/evaluation-scores", response_model=RequestEvaluationScores)
+def evaluation_scores(id_gronos_new: int, session: Db, response: Response) -> RequestEvaluationScores:
+    """Reifegrad of one request, computed in the backend: per evaluator the
+    latest result of every check (Gold + inputs not yet processed by
+    BronzeToGold), grouped by sub-criterion, with points per sub-criterion,
+    score per scoring group and overall percent; plus the combined score of
+    all evaluators. The editing view loads it once and recomputes the own
+    column locally while the user changes checks."""
+    current_request(session, id_gronos_new)
+    response.headers["Cache-Control"] = "no-store"
+    return request_scores(load_framework(session), evaluators(session), id_gronos_new, entries(session, id_gronos_new))
+
+
+@router.get("/evaluation-scores", response_model=EvaluationScoreSummaries)
+def evaluation_score_summaries(
+    session: Db,
+    response: Response,
+    ids: Annotated[list[int], Query(description="id_gronos_new, mehrfach angebbar (höchstens 500)")],
+) -> EvaluationScoreSummaries:
+    """Compact Reifegrad of several requests for the overview: combined score,
+    per evaluator percent, complete and deviates, diverging groups and the
+    number of comments. Unknown ids are left out."""
+    if len(ids) > 500:
+        raise HTTPException(status_code=422, detail="Höchstens 500 ids")
+    wanted = list(dict.fromkeys(ids))
+    known = set(session.scalars(select(Request.id_gronos_new).where(Request.id_gronos_new.in_(wanted))))
+    fw = load_framework(session)
+    users = evaluators(session)
+    by_ticket = entries_for(session, wanted)
+    items = []
+    for ticket in wanted:
+        if ticket not in known:
+            continue
+        all_entries = by_ticket.get(ticket, [])
+        s = request_scores(fw, users, ticket, all_entries)
+        items.append(EvaluationScoreSummary(
+            id_gronos_new=ticket, percent=s.combined.percent, done=s.combined.done, total=s.combined.total,
+            complete=s.combined.complete, diverging_groups=s.combined.diverging_groups,
+            comment_count=sum(1 for e in all_entries if e.comment), last_change=s.last_change,
+            reviewers=[ReviewerSummaryOut(user_id=r.user.id, name=r.user.name, role=r.user.role,
+                                          role_label=r.user.role_label, short=short_of(r.user.role),
+                                          percent=r.percent, complete=r.complete, deviates=r.deviates,
+                                          last_change=r.last_change) for r in s.reviewers]))
+    response.headers["Cache-Control"] = "no-store"
+    return EvaluationScoreSummaries(items=items, total=len(items))
 
 
 @router.get("/grid-connection-requests/{id_gronos_new}/evaluation-history", response_model=EvaluationHistory)
