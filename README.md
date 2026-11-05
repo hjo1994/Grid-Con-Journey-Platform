@@ -288,11 +288,15 @@ Task-Log ausgegeben (inkl. Ticketname).
 
 ## Verifiziert
 
-05.11.2026: 30 Tests (`tests/`, SQLAlchemy 1.4), darunter Framework gegen die
-Excel-Regeln, Nutzer-Upsert, BronzeToGold (Versionen je Nutzer:in und Check,
+05.11.2026: 32 Tests (`tests/`, SQLAlchemy 1.4), darunter Framework gegen die
+Excel-Regeln, Seeding-DAG (Framework idempotent, keine Nutzer:innen;
+BronzeToGold bricht ohne Framework ab und ändert die Config nicht),
+Nutzer-Upsert, BronzeToGold (Versionen je Nutzer:in und Check,
 Delta: unveränderte Eingaben bekommen nur eine BusinessTransaction,
 Wasserlinie, neue Silver-Stände), Umbenennung der BT-Spalten. Alle DAGs mit
-Airflow 2.10.2 geparst, `airflow dags test grid_con_bronze_to_gold` erfolgreich.
+Airflow 2.10.2 geparst; `airflow dags test grid_con_seed_config` und danach
+`grid_con_bronze_to_gold` erfolgreich (ohne Seeding schlägt BronzeToGold
+erwartungsgemäß fehl).
 
 ### Früher (13.10.2026)
 
