@@ -186,9 +186,3 @@ export interface UserEvaluations {
   total: number;
 }
 
-/** GET /users/me: the signed-in user; `user` is null when not registered in Users (read-only). */
-export interface Me {
-  email: string;
-  name: string | null;
-  user: User | null;
-}

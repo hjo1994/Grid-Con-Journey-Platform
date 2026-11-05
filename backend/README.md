@@ -26,12 +26,11 @@ Beides ohne Anmeldung.
 | `GET /api/healthz` | Liveness, ohne Auth, prüft nicht die DB |
 | `GET /api/auth/rights` | angemeldeter Nutzer und seine Rechte (für das Frontend) |
 | `GET /users` | Nutzer:innen mit `role` (`netzplanung`, `flaechen_recht`, `finanzen`, `viewer`), `can_evaluate` |
-| `GET /users/me` | angemeldete Nutzer:in (E-Mail, Name aus dem Token) und ihr `Users`-Eintrag (`user`, `null` = nicht angelegt, nur lesen) |
-| `GET /users/me/evaluations` | „Meine Bewertungen“: alle von mir bewerteten Anträge mit meinen aktuellen Check-Ergebnissen, zuletzt geändert zuerst |
+| `GET /users/{id}/evaluations` | „Meine Bewertungen“: alle von der Nutzer:in bewerteten Anträge mit ihren aktuellen Check-Ergebnissen, zuletzt geändert zuerst |
 | `GET /evaluation-framework` | Kriterien → Unterkriterien → Checks (Gewicht, `scoring_group`, `max_score`, `check_type`, `points`, `graded`, `alternative_group`) |
 | `GET /grid-connection-requests/{id}/evaluation` | aktueller Stand je Prüfer:in und Check (`verdict`, `score`, `comment`, `version`, `pending`) und die Prüfer:innen |
 | `GET /grid-connection-requests/{id}/evaluation-history` | Verlauf, neueste zuerst, mit Vorwert; `kind=all\|ratings\|comments`, `scoring_group`, `user_id` |
-| `POST /grid-connection-requests/{id}/evaluation-inputs` | ein oder mehrere Checks der angemeldeten Prüfer:in speichern; nicht angelegt oder Rolle `viewer`: `403`, ungültig: `422`, sonst `201` |
+| `POST /grid-connection-requests/{id}/evaluation-inputs` | ein oder mehrere Checks speichern, Prüfer:in im Header `X-User-ID` (fehlt/unbekannt `401`, Rolle `viewer` `403`), ungültig `422`, sonst `201` |
 
 **Feldnamen:** die Silver-Spalten in snake_case (`RequestStatus` →
 `request_status`, `maxP` → `max_p`, `CustomerID` → `customer_id`). Zeitstempel
@@ -71,10 +70,11 @@ die Doku nicht. Gesteuert über `EG_AUTH_DEV_MODE` und `EG_AUTH_DEV_GROUPS`
 
 ## Bewertung (K1/K4)
 
-- **Wer bewertet:** die angemeldete Nutzer:in. Ihre E-Mail aus dem Token
-  (`UserInfo.email`) wird in `Users.Email` gesucht (ohne Groß-/Kleinschreibung);
-  die Rolle dort entscheidet. Nutzer:innen legt Input Orchestration an
-  (`migrations/evaluation.py --users users.csv`).
+- **Wer bewertet:** die in der Kopfzeile der App gewählte Nutzer:in, als
+  `X-User-ID` (Users.ID), unabhängig vom eg-auth-Login. eg-auth schützt nur
+  den Zugang; jede angemeldete Person kann damit als jede Prüfer:in bewerten
+  (bewusst, wie in der Demo). Nutzer:innen legt Input Orchestration an
+  (`migrations/evaluation.py --users <csv>` oder `--demo`).
 - **Schreiben:** `POST …/evaluation-inputs` hängt je Check eine Zeile an
   `UserEvaluationInputs` an (`BEGIN IMMEDIATE`, Zeitstempel streng monoton)
   und löst danach im Hintergrund den DAG `grid_con_bronze_to_gold` aus
@@ -147,7 +147,6 @@ nur `UserEvaluationInputs`.
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-local.txt
 EG_AUTH_DEV_MODE=True EG_AUTH_DEV_GROUPS='["app_50hzt_aap_communities_all__x"]' \
-EG_AUTH_DEV_EMAIL=finanzen@example.invalid \
 GRID_CON_DB_PATH=/pfad/zu/grid_con.db \
   .venv/bin/uvicorn app.main:app --port 8000
 .venv/bin/python -m pytest
@@ -171,11 +170,10 @@ und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
 
 ## Verifiziert
 
-05.11.2026: 41 Tests, davon 11 zur Bewertung (Framework, Nutzer:innen,
-`/users/me` mit E-Mail-Zuordnung, Stand aus Gold + ausstehenden Eingaben
-über Silver-Stände, Verlauf, Delta-Regel, 401/403/422, „Meine Bewertungen“,
-Airflow-2-Trigger mit Basic Auth). Gegen den eg-auth-Stub; ob das echte
-`eg-auth` `UserInfo.email` liefert, ist nicht geprüft.
+05.11.2026: 41 Tests, davon 12 Bewertungstests (Framework, Nutzer:innen, Stand aus Gold +
+ausstehenden Eingaben über Silver-Stände, Verlauf, Delta-Regel, 401/403/422,
+„Meine Bewertungen“, Anmeldung nötig, Airflow-2-Trigger mit Basic Auth),
+gegen den eg-auth-Stub.
 
 
 27 Tests gegen eine synthetische Test-DB (aktueller Stand vs. Historie,

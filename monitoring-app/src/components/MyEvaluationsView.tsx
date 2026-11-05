@@ -22,7 +22,7 @@ export function MyEvaluationsView({ me }: { me: User | null }) {
     if (!me) return;
     const ctrl = new AbortController();
     setData(null);
-    Promise.all([api.framework(ctrl.signal), api.myEvaluations(ctrl.signal)])
+    Promise.all([api.framework(ctrl.signal), api.userEvaluations(me.id, ctrl.signal)])
       .then(([f, d]) => {
         setFramework(f);
         setData(d);
@@ -34,7 +34,7 @@ export function MyEvaluationsView({ me }: { me: User | null }) {
 
   const groups = useMemo(() => scoringGroups(framework ?? []), [framework]);
 
-  if (!me) return <p className="dim">Du bist nicht als Prüfer:in angelegt. Bewertungen kannst du lesen, aber nicht abgeben.</p>;
+  if (!me) return <p className="dim">Bitte oben eine Nutzer:in wählen.</p>;
   if (error) return <ErrorNote message={error} />;
 
   const items = data?.items ?? [];

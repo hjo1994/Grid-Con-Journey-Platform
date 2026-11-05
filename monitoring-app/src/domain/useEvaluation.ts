@@ -135,7 +135,7 @@ export function useEvaluation(idGronosNew: number, userId: string | null): Evalu
     }
     setSaving(true);
     try {
-      await api.saveEvaluation(idGronosNew, items);
+      await api.saveEvaluation(idGronosNew, userId, items);
       await refresh();
       setDraft(new Map());
       return true;

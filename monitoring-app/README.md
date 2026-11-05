@@ -35,11 +35,11 @@ Hash-Routen: ohne Hash bzw. `#/meine-bewertungen` „Meine Bewertungen“
 `#/antraege/<id>/verlauf` (K4). Im Detailbereich führen „Reifegrad bewerten“
 und „Verlauf“ dorthin.
 
-- **Nutzer:in = Anmeldung (OIDC):** die App fragt `GET /users/me`; das
-  Backend ordnet die E-Mail aus dem Token einem Eintrag in `Users` zu (Rolle).
-  Nur Prüfer-Rollen (Netzplanung, Flächen & Recht, Finanzen) können bewerten,
-  alle anderen lesen. Nach der Anmeldung öffnet sich „Meine Bewertungen“.
-  Lokal mit Dev-Bypass: Backend mit `EG_AUTH_DEV_EMAIL=<E-Mail aus Users>`.
+- **Angemeldet als:** Auswahl der Nutzer:in in der Kopfzeile, unabhängig vom
+  OIDC-Login (der nur den Zugang zur App schützt). Gespeichert in
+  `localStorage` (`gridcon.userId`), beim Speichern gesendet als
+  `X-User-ID`. Die Wahl ist die „Anmeldung“ für die Bewertung: danach öffnet
+  sich „Meine Bewertungen“.
 - **Meine Bewertungen** (`src/components/MyEvaluationsView.tsx`): alle
   Anträge, die die Nutzer:in bewertet hat, zuletzt geändert zuerst, mit dem
   eigenen zuletzt gespeicherten Reifegrad, Zahl der bewerteten Checks und
@@ -137,7 +137,7 @@ ist gitignored und muss im Firmennetz erzeugt werden.
 
 ## Verifiziert
 
-34 Tests (05.11.2026, mit eg-auth: Nutzer:in aus `GET /users/me`), zusätzlich: Punkteregeln (Mindestanforderungen,
+34 Tests (05.11.2026), zusätzlich: Punkteregeln (Mindestanforderungen,
 Alternativen, Deckelung, abgestufte Punkte, Reifegrad), Abweichungen,
 Verlaufs-Replay, K1 (eigene Spalte bearbeitbar, fremde read-only, Entwurf,
 nur Delta mit Kommentaren in einem Aufruf, Verwerfen), „Meine Bewertungen“,

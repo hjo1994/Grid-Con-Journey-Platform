@@ -21,7 +21,7 @@ function setup(checks: EvaluationEntry[]) {
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body));
-      posts.push({ body });
+      posts.push({ body, user: (init.headers as Record<string, string>)["X-User-ID"] });
       for (const c of body.checks) {
         current = current.filter((e) => !(e.user_id === ME.id && e.evaluation_check_id === c.evaluation_check_id));
         current.push(entry(ME.id, c.evaluation_check_id, c.verdict, c.verdict === "fulfilled" ? 2 : 0, c.comment));
@@ -69,7 +69,7 @@ describe("K1 evaluation", () => {
     expect(posts).toEqual([]);                                                          // nothing saved yet
 
     await userEvent.click(save);
-    await waitFor(() => expect(posts).toEqual([{ body: { checks: [{ evaluation_check_id: "B3-04", verdict: "fulfilled", score: null }] } }]));
+    await waitFor(() => expect(posts).toEqual([{ body: { checks: [{ evaluation_check_id: "B3-04", verdict: "fulfilled", score: null }] }, user: ME.id }]));
     expect(await screen.findByText("Keine ungespeicherten Änderungen")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText("Reifegrad Netzplanung")).toHaveTextContent("33 %"));
   });
@@ -94,7 +94,7 @@ describe("K1 evaluation", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Bewertung speichern" }));
     await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]).toEqual({ body: { checks: [
+    expect(posts[0]).toEqual({ user: ME.id, body: { checks: [
       { evaluation_check_id: "B3-04", verdict: "not_fulfilled", score: null },
       { evaluation_check_id: "B3-01", verdict: "fulfilled", score: null, comment: "Trasse geprüft" },
     ] } });
@@ -139,7 +139,7 @@ describe("Meine Bewertungen", () => {
       const url = new URL(String(input), "http://localhost");
       const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url.pathname.endsWith("/evaluation-framework")) return json(FRAMEWORK);
-      if (url.pathname.endsWith("/users/me/evaluations"))
+      if (url.pathname.endsWith(`/users/${ME.id}/evaluations`))
         return json({ user: ME, total: 2, items: [
           { id_gronos_new: 5100, id_gronos_old: "Projekt-H01", generation_technology: "Wind", max_p: 120, request_status: "Eingestellt", last_change: "2026-11-04T15:00:00Z", pending: true,
             checks: [entry(ME.id, "B3-01", "fulfilled", 0), entry(ME.id, "B3-04", "fulfilled", 2)] },

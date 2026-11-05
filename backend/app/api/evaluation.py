@@ -1,17 +1,15 @@
 """Collaborative evaluation (K1 "Spalte je Prüfer", K4 "Verlauf").
 
-Identity: the signed-in user (eg-auth). Their e-mail is looked up in
-``Users.Email`` (case-insensitive); the role there decides whether they may
-evaluate. Every endpoint needs a signed-in user (``authorizer()``); a user
-without a Users entry may read but not evaluate.
+Access: every endpoint needs a signed-in user (eg-auth, ``authorizer()``).
+The evaluator is chosen in the app's header independent of the sign-in and
+passed in the ``X-User-ID`` header (Users.ID) when saving; reading needs no
+evaluator.
 """
 from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from eg_auth.fastapi import UserInfo
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
-from sqlalchemy import func
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -47,7 +45,6 @@ from app.schemas import (
     EvaluationInputResult,
     EvaluationState,
     HistoryEntryOut,
-    MeOut,
     SubCriterionOut,
     UserEvaluationItem,
     UserEvaluations,
@@ -57,15 +54,6 @@ from app.schemas import (
 router = APIRouter(prefix="/api/v1", tags=["evaluation"], dependencies=[authorizer()])
 
 Db = Annotated[Session, Depends(get_session)]
-SignedIn = Annotated[UserInfo, authorizer()]
-
-
-def registered_user(session: Session, info: UserInfo) -> User | None:
-    """Users entry of the signed-in user (by e-mail), or None."""
-    email = (info.email or "").strip().lower()
-    if not email:
-        return None
-    return session.scalars(select(User).where(func.lower(User.Email) == email)).first()
 
 
 def user_out(u: User) -> UserOut:
@@ -95,25 +83,18 @@ def list_users(session: Db) -> list[UserOut]:
     return [user_out(u) for u in users]
 
 
-@router.get("/users/me", response_model=MeOut)
-def me(session: Db, info: SignedIn) -> MeOut:
-    """The signed-in user and their Users entry (role, ``can_evaluate``)."""
-    user = registered_user(session, info)
-    return MeOut(email=info.email, name=info.name, user=user_out(user) if user else None)
-
-
-@router.get("/users/me/evaluations", response_model=UserEvaluations)
-def my_evaluations(session: Db, info: SignedIn, response: Response) -> UserEvaluations:
-    """"Meine Bewertungen": every request the signed-in user has evaluated with
-    their current check results (Gold + pending), most recently changed first.
-    The maturity level is computed by the client from ``checks`` and the
-    framework, as in K1."""
-    user = registered_user(session, info)
+@router.get("/users/{user_id}/evaluations", response_model=UserEvaluations)
+def user_evaluations(user_id: str, session: Db, response: Response) -> UserEvaluations:
+    """"Meine Bewertungen": every request the user has evaluated with their
+    current check results (Gold + pending), most recently changed first. The
+    maturity level is computed by the client from ``checks`` and the framework,
+    as in K1."""
+    user = session.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=404, detail="Nicht als Nutzer:in angelegt")
+        raise HTTPException(status_code=404, detail="Unbekannte Nutzer:in")
     items = []
-    for ticket in evaluated_tickets(session, user.ID):
-        own = [e for e in entries(session, ticket) if e.user_id == user.ID]
+    for ticket in evaluated_tickets(session, user_id):
+        own = [e for e in entries(session, ticket) if e.user_id == user_id]
         if not own:
             continue
         request = current_request(session, ticket)
@@ -206,9 +187,9 @@ def post_evaluation_inputs(
     body: EvaluationInputBody,
     background: BackgroundTasks,
     session: Annotated[Session, Depends(get_write_session)],
-    info: SignedIn,
+    x_user_id: Annotated[str | None, Header(description="Users.ID of the acting evaluator")] = None,
 ) -> EvaluationInputResult:
-    """Store one or several check evaluations of the signed-in user (Bronze
+    """Store one or several check evaluations of the acting user (Bronze
     UserEvaluationInputs, append-only) and trigger BronzeToGold. The monitoring
     app sends everything staged until "Bewertung speichern" in one call.
 
@@ -221,9 +202,11 @@ def post_evaluation_inputs(
     from the framework (minimum checks 0, points checks their points); only
     for ``graded`` checks the evaluator sends 1 … points.
     """
-    user = registered_user(session, info)
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="X-User-ID fehlt")
+    user = session.get(User, x_user_id)
     if user is None:
-        raise HTTPException(status_code=403, detail="Nicht als Prüfer:in angelegt")
+        raise HTTPException(status_code=401, detail="Unbekannte Nutzer:in")
     if user.Role not in EVALUATOR_ROLES:
         raise HTTPException(status_code=403, detail="Diese Rolle darf nicht bewerten")
     request = current_request(session, id_gronos_new)

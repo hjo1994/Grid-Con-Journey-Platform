@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, ApiError, type ListQuery } from "./api/client";
-import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField, Me } from "./api/types";
+import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField, User } from "./api/types";
 import { DetailPanel } from "./components/DetailPanel";
 import { EvaluationView } from "./components/EvaluationView";
 import { HistoryView } from "./components/HistoryView";
@@ -10,7 +10,7 @@ import { Pager, RequestTable } from "./components/RequestTable";
 import { ErrorNote } from "./components/small";
 import { StatusWidget, TechWidget } from "./components/Widgets";
 import { fmtShortDateTime } from "./domain/format";
-import { hrefOf, mayLeave, useRoute } from "./domain/route";
+import { hrefOf, mayLeave, setLeaveGuard, useRoute } from "./domain/route";
 import { groupByPhase, STOPPED_STATUS } from "./domain/status";
 import { techShares } from "./domain/technology";
 
@@ -32,21 +32,45 @@ function latest(...values: (string | null | undefined)[]): string | null {
   return values.filter((v): v is string => !!v).sort().at(-1) ?? null;
 }
 
-// The signed-in user (eg-auth) and their entry in Users (role). Only users
-// with an evaluator role may evaluate; everyone else reads.
-function useMe() {
-  const [me, setMe] = useState<Me | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const USER_KEY = "gridcon.userId";
+
+function storedUserId(): string | null {
+  try {
+    return window.localStorage.getItem(USER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+// The evaluator is picked in the header, independent of the OIDC sign-in
+// (which only guards access to the app). The choice is sent to the backend as
+// X-User-ID when saving an evaluation. Picking a user asks first if there are
+// unsaved changes and then opens "Meine Bewertungen" with their latest results.
+function useCurrentUser() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [userId, setUserId] = useState<string | null>(storedUserId);
   useEffect(() => {
-    api.me().then(setMe).catch((err) => setError(errorText(err)));
+    api.users().then(setUsers).catch(() => setUsers([]));
   }, []);
-  return { me, user: me?.user ?? null, error };
+  const me = users.find((u) => u.id === userId) ?? users.find((u) => u.can_evaluate) ?? null;
+  const choose = (id: string) => {
+    if (!mayLeave()) return;
+    setLeaveGuard(null);
+    setUserId(id);
+    window.location.hash = hrefOf({ page: "mine" });
+    try {
+      window.localStorage.setItem(USER_KEY, id);
+    } catch {
+      /* private mode: choice lasts for the session only */
+    }
+  };
+  return { users, me, choose };
 }
 
 /** `signOut`: show the sign-out link (only behind the OIDC login, see AuthApp.tsx). */
 export default function App({ signOut = false }: { signOut?: boolean }) {
   const route = useRoute();
-  const { me, user, error: meError } = useMe();
+  const { users, me, choose } = useCurrentUser();
   const [asOf, setAsOf] = useState<string | null>(null);
 
   return (
@@ -74,11 +98,18 @@ export default function App({ signOut = false }: { signOut?: boolean }) {
               Datenstand <b className={asOf ? "" : "unknown"}>●</b> {asOf ?? "unbekannt"}
             </>
           ) : (
-            me && (
-              <span className="me">
-                angemeldet als <b>{me.name ?? me.email}</b>
-                {user ? <> · {user.role_label} · {user.can_evaluate ? "zur Bewertung berechtigt" : "nur lesend"}</> : " · nur lesend"}
-              </span>
+            users.length > 0 && (
+              <label className="me">
+                angemeldet als{" "}
+                <select value={me?.id ?? ""} onChange={(e) => choose(e.target.value)} aria-label="Nutzer:in wählen">
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.role_label} · {u.name ?? u.email}
+                    </option>
+                  ))}
+                </select>
+                {me && <span> · {me.can_evaluate ? "zur Bewertung berechtigt" : "nur lesend"}</span>}
+              </label>
             )
           )}
         </span>
@@ -88,18 +119,17 @@ export default function App({ signOut = false }: { signOut?: boolean }) {
           </a>
         )}
       </header>
-      {meError && <ErrorNote message={meError} />}
       {route.page === "mine" ? (
         <main className="body">
-          <MyEvaluationsView me={user} />
+          <MyEvaluationsView me={me} />
         </main>
       ) : route.page === "evaluation" ? (
         <main className="body">
-          <EvaluationView key={route.id} id={route.id} me={user} />
+          <EvaluationView key={`${route.id}-${me?.id}`} id={route.id} me={me} />
         </main>
       ) : route.page === "history" ? (
         <main className="body">
-          <HistoryView key={route.id} id={route.id} me={user} />
+          <HistoryView key={route.id} id={route.id} me={me} />
         </main>
       ) : (
         <Overview onAsOf={setAsOf} />

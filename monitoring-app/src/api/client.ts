@@ -6,7 +6,6 @@ import type {
   EvaluationHistory,
   EvaluationInputItem,
   EvaluationState,
-  Me,
   User,
   UserEvaluations,
   GridConnectionRequestWithCustomer,
@@ -68,18 +67,18 @@ async function get<T>(path: string, params?: Params, signal?: AbortSignal): Prom
   return (await res.json()) as T;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, extra: Record<string, string> = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(buildUrl(path), {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json", ...(await authHeaders()) },
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...(await authHeaders()), ...extra },
       body: JSON.stringify(body),
     });
   } catch {
     throw new ApiError(null, messageFor(null));
   }
-  if (res.status === 403) throw new ApiError(403, "Du bist nicht als Prüfer:in angelegt und kannst nur lesen.");
+  if (res.status === 403) throw new ApiError(403, "Diese Nutzer:in darf nicht bewerten.");
   if (!res.ok) throw new ApiError(res.status, messageFor(res.status));
   return (await res.json()) as T;
 }
@@ -107,10 +106,8 @@ export const api = {
 
   users: (signal?: AbortSignal) => get<User[]>("/users", undefined, signal),
 
-  /** The signed-in user (eg-auth) and their Users entry. */
-  me: (signal?: AbortSignal) => get<Me>("/users/me", undefined, signal),
-
-  myEvaluations: (signal?: AbortSignal) => get<UserEvaluations>("/users/me/evaluations", undefined, signal),
+  userEvaluations: (userId: string, signal?: AbortSignal) =>
+    get<UserEvaluations>(`/users/${encodeURIComponent(userId)}/evaluations`, undefined, signal),
 
   framework: (signal?: AbortSignal) => get<EvaluationCriterion[]>("/evaluation-framework", undefined, signal),
 
@@ -120,10 +117,10 @@ export const api = {
   history: (idGronosNew: number, signal?: AbortSignal) =>
     get<EvaluationHistory>(`/grid-connection-requests/${idGronosNew}/evaluation-history`, undefined, signal),
 
-  // The backend takes the evaluator from the sign-in (eg-auth token).
-  // One call per "Bewertung speichern" with all changed checks.
-  saveEvaluation: (idGronosNew: number, checks: EvaluationInputItem[]) =>
-    post<{ items: EvaluationEntry[]; unchanged: number }>(`/grid-connection-requests/${idGronosNew}/evaluation-inputs`, { checks }),
+  // The evaluator picked in the header goes in X-User-ID (independent of the
+  // OIDC sign-in, which only guards access). One call per "Bewertung speichern".
+  saveEvaluation: (idGronosNew: number, userId: string, checks: EvaluationInputItem[]) =>
+    post<{ items: EvaluationEntry[]; unchanged: number }>(`/grid-connection-requests/${idGronosNew}/evaluation-inputs`, { checks }, { "X-User-ID": userId }),
 
   // The request list carries only customer_id; names come from the customer
   // resource, loaded completely once (about 120 customers).

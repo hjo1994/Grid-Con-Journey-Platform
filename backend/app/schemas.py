@@ -252,10 +252,3 @@ class UserEvaluations(BaseModel):
     items: list[UserEvaluationItem] = Field(description="Zuletzt geänderte zuerst")
     total: int
 
-
-class MeOut(BaseModel):
-    """The signed-in user (eg-auth) and, if registered, their Users entry."""
-
-    email: str
-    name: str | None
-    user: UserOut | None = Field(description="null = not registered in Users: may read, not evaluate")

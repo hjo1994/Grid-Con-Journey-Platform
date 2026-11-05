@@ -19,9 +19,6 @@ class _AuthDevSettings(BaseSettings):
 
     dev_mode: bool = False
     dev_groups: List[str] = []
-    # signed-in user in dev mode; set to a Users e-mail to evaluate locally
-    dev_email: str = "dev.user@example.com"
-    dev_name: str = "Dev User"
 
 
 @dataclass
@@ -52,8 +49,8 @@ class FastAPIResourceProtector:
                 if getattr(rights, claim, None) != expected:
                     raise HTTPException(status_code=403, detail=f"Missing right: {claim}")
             return UserInfo(
-                name=settings.dev_name,
-                email=settings.dev_email,
+                name="Dev User",
+                email="dev.user@example.com",
                 groups=settings.dev_groups,
                 rights=rights,
             )

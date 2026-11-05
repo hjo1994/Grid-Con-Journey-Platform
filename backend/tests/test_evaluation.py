@@ -24,8 +24,6 @@ from app.models import (
 BASE = "/api/v1/grid-connection-requests"
 T0 = datetime.datetime(2026, 11, 3, 9, 12, 0)
 NP, RE, FI, VIEWER = "u-np", "u-re", "u-fi", "u-view"
-EMAIL = {NP: "np@example.invalid", RE: "Re@Example.invalid", FI: "fi@example.invalid", VIEWER: "v@example.invalid",
-         "nobody": "nobody@example.invalid"}
 
 
 @pytest.fixture()
@@ -78,22 +76,12 @@ def client(db_path, monkeypatch):
     monkeypatch.setattr("app.api.evaluation.trigger_gold_dag", lambda: calls.append(1) or True)
     c = TestClient(get_app(db_path))
     c.trigger_calls = calls
-    c.mp = monkeypatch
     return c
 
 
-def sign_in(client, user):
-    """eg-auth stub: the signed-in user is EG_AUTH_DEV_EMAIL (None = signed out)."""
-    if user is None:
-        client.mp.setenv("EG_AUTH_DEV_MODE", "false")
-    else:
-        client.mp.setenv("EG_AUTH_DEV_MODE", "true")
-        client.mp.setenv("EG_AUTH_DEV_EMAIL", EMAIL[user])
-
-
-def post(client, user, *checks, ticket=4902):
-    sign_in(client, user)
-    return client.post(f"{BASE}/{ticket}/evaluation-inputs", json={"checks": list(checks)})
+def post(client, user, *checks):
+    return client.post(f"{BASE}/4902/evaluation-inputs", json={"checks": list(checks)},
+                       headers={"X-User-ID": user} if user else {})
 
 
 def test_framework_and_users(client):
@@ -168,14 +156,15 @@ def test_several_checks_in_one_input_share_the_timestamp(client):
 
 def test_input_validation_and_permissions(client):
     ok = {"evaluation_check_id": "B3-04", "verdict": "fulfilled"}
-    assert post(client, None, ok).status_code == 401                        # not signed in
-    assert post(client, "nobody", ok).status_code == 403                    # signed in, not in Users
+    assert post(client, None, ok).status_code == 401
+    assert post(client, "nobody", ok).status_code == 401
     assert post(client, VIEWER, ok).status_code == 403
     assert post(client, NP, {"evaluation_check_id": "XX", "verdict": "fulfilled"}).status_code == 422
     assert post(client, NP, {"evaluation_check_id": "B3-04", "verdict": "maybe"}).status_code == 422
     assert post(client, NP, {"evaluation_check_id": "D1-01", "verdict": "fulfilled"}).status_code == 422
     assert post(client, NP, {"evaluation_check_id": "D1-01", "verdict": "fulfilled", "score": 3}).status_code == 422
-    assert post(client, NP).status_code == 422                              # no checks
+    assert client.post(f"{BASE}/4902/evaluation-inputs", json={"checks": []},
+                       headers={"X-User-ID": NP}).status_code == 422
     resp = post(client, NP, {"evaluation_check_id": "D1-01", "verdict": "open"})
     assert resp.status_code == 201 and resp.json()["items"][0]["score"] is None
 
@@ -221,11 +210,11 @@ def test_user_evaluations_lists_own_current_results(client, db_path):
     con.execute("INSERT INTO GridConnectionRequests (ID, id_gronos_new, id_gronos_old, GenerationTechnology, maxP, "
                 "RequestStatus, timestamp) VALUES ('r2', 5100, 'Projekt-H01', 'Wind', 120, 'Eingestellt', ?)", (str(T0),))
     con.commit()
-    post(client, RE, {"evaluation_check_id": "D1-01", "verdict": "fulfilled", "score": 2}, ticket=5100)
+    client.post(f"{BASE}/5100/evaluation-inputs", json={"checks": [{"evaluation_check_id": "D1-01", "verdict": "fulfilled",
+                                                                    "score": 2}]}, headers={"X-User-ID": RE})
     post(client, NP, {"evaluation_check_id": "B3-04", "verdict": "fulfilled"})
 
-    sign_in(client, RE)                                                      # e-mail match is case-insensitive
-    body = client.get("/api/v1/users/me/evaluations").json()
+    body = client.get(f"/api/v1/users/{RE}/evaluations").json()
     assert body["user"]["id"] == RE and body["total"] == 2
     newest, older = body["items"]
     assert (newest["id_gronos_new"], newest["id_gronos_old"], newest["generation_technology"], newest["pending"]) == \
@@ -234,22 +223,15 @@ def test_user_evaluations_lists_own_current_results(client, db_path):
     assert (older["id_gronos_new"], older["pending"], older["last_change"]) == (4902, False, "2026-11-03T09:12:00Z")
     assert [c["user_id"] for c in older["checks"]] == [RE]                    # only the own results
 
-    sign_in(client, FI)
-    assert client.get("/api/v1/users/me/evaluations").json() == {
+    assert client.get(f"/api/v1/users/{FI}/evaluations").json() == {
         "user": client.get("/api/v1/users").json()[0], "items": [], "total": 0}
-    sign_in(client, "nobody")
-    assert client.get("/api/v1/users/me/evaluations").status_code == 404
+    assert client.get("/api/v1/users/nobody/evaluations").status_code == 404
 
 
-def test_me_maps_the_signed_in_email_to_users(client):
-    sign_in(client, RE)
-    me = client.get("/api/v1/users/me").json()
-    assert (me["email"], me["user"]["id"], me["user"]["can_evaluate"]) == ("Re@Example.invalid", RE, True)
-    sign_in(client, "nobody")
-    assert client.get("/api/v1/users/me").json()["user"] is None
-    sign_in(client, None)
-    assert client.get("/api/v1/users/me").status_code == 401
-    assert client.get(f"{BASE}/4902/evaluation").status_code == 401        # every endpoint needs a sign-in
+def test_evaluation_endpoints_need_a_sign_in(client, monkeypatch):
+    monkeypatch.setenv("EG_AUTH_DEV_MODE", "false")
+    assert client.get(f"{BASE}/4902/evaluation").status_code == 401
+    assert post(client, NP, {"evaluation_check_id": "B3-04", "verdict": "fulfilled"}).status_code == 401
 
 
 def test_gold_trigger_uses_airflow2_api_with_basic_auth(monkeypatch):
