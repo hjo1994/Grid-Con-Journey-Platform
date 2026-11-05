@@ -6,10 +6,16 @@ import uuid
 
 import pytest
 
-from grid_con_ingestion.evaluation_framework import FRAMEWORK, framework_rows
+from grid_con_ingestion.evaluation_framework import FRAMEWORK, framework_rows, seed_framework
 from grid_con_ingestion.gronos.store import bronze_to_silver, write_bronze
 from grid_con_ingestion.migrations.evaluation import DEMO_USERS, setup_evaluation
-from grid_con_ingestion.writer import ensure_schema, next_input_timestamp, write_gold, write_transaction
+from grid_con_ingestion.writer import (
+    FrameworkNotSeeded,
+    ensure_schema,
+    next_input_timestamp,
+    write_gold,
+    write_transaction,
+)
 from tests.test_gronos import request_record
 
 
@@ -152,3 +158,30 @@ def test_schema_upgrade_renames_business_transaction_timestamps(tmp_path):
         ("bt1", "e1", "2026-11-01 10:00:00.000000", "2026-11-01 10:05:00.000000", None)]
     assert {"Users", "UserEvaluationInputs", "RequestEvaluationChecks", "EvaluationChecks"} <= {
         r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def test_seeding_dag_writes_framework_only(tmp_path):
+    """grid_con_seed_config: legt Tabellen an, schreibt das Framework idempotent, keine Nutzer:innen."""
+    db = tmp_path / "grid_con.db"
+    assert seed_framework(db) == {"criteria": 5, "sub_criteria": 10, "checks": 39}
+    assert seed_framework(db) == {"criteria": 5, "sub_criteria": 10, "checks": 39}
+    con = sqlite3.connect(db)
+    counts = [con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+              for t in ("EvaluationCriteria", "EvaluationSubCriteria", "EvaluationChecks", "Users")]
+    assert counts == [5, 10, 39, 0]
+
+
+def test_bronze_to_gold_needs_seeded_framework_and_leaves_config_alone(tmp_path):
+    db = tmp_path / "grid_con.db"
+    ensure_schema(db)
+    with pytest.raises(FrameworkNotSeeded, match="grid_con_seed_config"):
+        write_gold(db)
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT COUNT(*) FROM EvaluationChecks").fetchone()[0] == 0   # nichts angelegt
+    assert con.execute("SELECT COUNT(*) FROM BusinessTransactions").fetchone()[0] == 0
+
+    seed_framework(db)
+    con.execute("UPDATE EvaluationChecks SET Points = 7 WHERE ID = 'B3-04'")          # Config manuell geändert
+    con.commit()
+    assert write_gold(db).inputs == 0
+    assert con.execute("SELECT Points FROM EvaluationChecks WHERE ID = 'B3-04'").fetchone()[0] == 7

@@ -1,8 +1,8 @@
 """Einmalig bzw. bei Änderungen: Bewertungs-Framework und Nutzer:innen anlegen.
 
 Das Framework (EvaluationCriteria, EvaluationSubCriteria, EvaluationChecks)
-kommt aus ``evaluation_framework.py``; BronzeToGold gleicht es zusätzlich bei
-jedem Lauf ab. Nutzer:innen kommen aus einer CSV-Datei mit den Spalten
+kommt aus ``evaluation_framework.py``; im Cluster schreibt es der Seeding-DAG
+``grid_con_seed_config``, dieses Skript ist die lokale Alternative. Nutzer:innen kommen aus einer CSV-Datei mit den Spalten
 ``email,name,role`` (Rollen siehe ``models.ROLES``) oder – nur für lokale
 Demos – mit ``--demo`` aus drei Beispiel-Prüfer:innen (eine je Fachrolle).
 Beides ist idempotent; bestehende Nutzer:innen werden über die E-Mail

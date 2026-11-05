@@ -21,7 +21,9 @@ Bewusste Vereinfachungen gegenüber der Excel (fachlich zu bestätigen):
 
 Die Scoring-Regeln selbst wertet die Bewertungsoberfläche aus
 (monitoring-app/src/domain/scoring.ts); hier stehen nur die Stammdaten.
-:func:`sync_framework` schreibt sie idempotent in die Datenbank.
+:func:`sync_framework` schreibt sie idempotent in die Datenbank; ausgeführt
+vom Seeding-DAG ``grid_con_seed_config`` (:func:`seed_framework`), nicht von
+BronzeToGold.
 """
 from __future__ import annotations
 
@@ -160,3 +162,16 @@ def sync_framework(conn: sqlite3.Connection) -> dict[str, int]:
         checks,
     )
     return {"criteria": len(criteria), "sub_criteria": len(subs), "checks": len(checks)}
+
+
+def seed_framework(db_path) -> dict[str, int]:
+    """Seeding: Schema sicherstellen und das Framework in die Config-Tabellen
+    schreiben (eine Transaktion, idempotent)."""
+    from grid_con_ingestion.writer import write_transaction
+
+    with write_transaction(db_path) as conn:
+        return sync_framework(conn)
+
+
+def framework_seeded(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM EvaluationChecks LIMIT 1").fetchone() is not None

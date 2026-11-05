@@ -94,6 +94,12 @@ Kollaborative Reifegradbewertung (K1/K4 in der Monitoring-App,
   `finanzen` | `viewer`) und das Framework `EvaluationCriteria` →
   `EvaluationSubCriteria` → `EvaluationChecks` (39 Checks, Regeln aus der
   Bewertungs-Excel, `grid_con_ingestion/evaluation_framework.py`).
+- **DAG `grid_con_seed_config`** (`dags/grid_con_seed_config_dag.py`), Task
+  `seed_evaluation_framework`: schreibt das Framework in die Config-Tabellen
+  und legt fehlende Tabellen an. Ohne Zeitplan; einmal nach dem Deployment
+  und nach jeder Änderung an `evaluation_framework.py` manuell auslösen.
+  Idempotent (aktualisiert und ergänzt, löscht nichts). Legt **keine**
+  Nutzer:innen an.
 - **Bronze:** `UserEvaluationInputs` – das Backend hängt je gespeichertem
   Check eine Zeile an (append-only, ein `Timestamp` je Speichern).
 - **Gold:** `RequestEvaluationChecks` – je Antrag (`id_gronos_new`, über alle
@@ -107,14 +113,16 @@ Kollaborative Reifegradbewertung (K1/K4 in der Monitoring-App,
   Nutzer:in und desselben Checks (`writer.input_unchanged`): ein neuer
   Gold-Eintrag nur bei anderem Verdict/Punktwert oder neuem Kommentar.
   Eingaben, die nicht zum Framework passen, werden übersprungen (Warnung).
-  Das Framework wird bei jedem Lauf abgeglichen.
+  BronzeToGold liest die Config-Tabellen nur; sind sie leer, bricht der Lauf
+  mit `FrameworkNotSeeded` ab („Run the seeding DAG grid_con_seed_config
+  first“).
 - **Auslösung:** das Backend nach jedem Speichern über die Airflow-REST-API
   (`POST /api/v1/dags/grid_con_bronze_to_gold/dagRuns`); optional zusätzlich
   `GRID_CON_GOLD_SCHEDULE` (empfohlen `*/15 * * * *` als Absicherung).
   `max_active_runs=1`.
 
 Nutzer:innen anlegen bzw. aktualisieren (idempotent über die E-Mail; legt
-auch Schema und Framework an):
+auch Schema und Framework an, lokale Alternative zum Seeding-DAG):
 
 ```bash
 python -m grid_con_ingestion.migrations.evaluation /data/db/grid_con.db --users users.csv
@@ -152,6 +160,7 @@ dags/
   grid_connection_requests_import_dag.py
   gronos_import_dags.py       # gronos_raw_to_bronze, gronos_bronze_to_silver
   grid_con_bronze_to_gold_dag.py
+  grid_con_seed_config_dag.py # Seeding der Config-Tabellen (Framework)
   dependency_loader.py        # Laufzeit-Installation fehlender Pakete
   .airflowignore              # dependency_loader.py ist kein DAG
 grid_con_ingestion/
@@ -173,6 +182,7 @@ grid_con_ingestion/
     bronce_to_silver.py
     gronos_raw_to_bronze.py, gronos_bronze_to_silver.py
     bronze_to_gold.py
+    seed_config.py            # Seeding des Frameworks
 tests/
 ```
 

@@ -414,6 +414,10 @@ def _valid_input(conn: sqlite3.Connection, check_id: str, verdict: str, score) -
     return None
 
 
+class FrameworkNotSeeded(RuntimeError):
+    """BronzeToGold ohne Framework in den Config-Tabellen."""
+
+
 def write_gold(db_path: str | Path) -> GoldStats:
     """BronzeToGold: alle UserEvaluationInputs mit ``Timestamp`` nach dem
     InputBronzeTimestamp des vorherigen Laufs → RequestEvaluationChecks.
@@ -423,14 +427,18 @@ def write_gold(db_path: str | Path) -> GoldStats:
     ``Version`` je Antrag (``id_gronos_new``), Nutzer:in und Check entsteht nur,
     wenn sich die Eingabe vom letzten Gold-Eintrag unterscheidet (Delta, siehe
     ``input_unchanged``); eine BusinessTransaction ohne Gold-Eintrag heißt
-    "verarbeitet, unverändert". Das Framework wird vorher abgeglichen
-    (idempotent), damit die Config-Tabellen immer zum Code passen.
+    "verarbeitet, unverändert". Die Config-Tabellen des Frameworks füllt der
+    Seeding-DAG ``grid_con_seed_config``; BronzeToGold liest sie nur und
+    bricht ab, solange sie leer sind (sonst würde jede Eingabe verworfen).
     """
-    from grid_con_ingestion.evaluation_framework import sync_framework
+    from grid_con_ingestion.evaluation_framework import framework_seeded
 
     stats = GoldStats()
     with write_transaction(db_path) as conn:
-        sync_framework(conn)
+        if not framework_seeded(conn):
+            raise FrameworkNotSeeded(
+                "Evaluation framework is empty (EvaluationChecks). Run the seeding DAG grid_con_seed_config first."
+            )
         last = _watermark(conn, "UserEvaluationInputID")
         stats.previous_input_bronze_timestamp = last
         rows = conn.execute(
