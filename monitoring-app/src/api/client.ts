@@ -1,6 +1,14 @@
 import type {
   AggregateResult,
   Customer,
+  EvaluationCriterion,
+  EvaluationEntry,
+  EvaluationHistory,
+  EvaluationInputItem,
+  EvaluationState,
+  Me,
+  User,
+  UserEvaluations,
   GridConnectionRequestWithCustomer,
   Meta,
   Page,
@@ -30,6 +38,7 @@ function messageFor(status: number | null): string {
   if (status === 403) return "Dir fehlt die Berechtigung für diese Daten.";
   if (status === 404) return "Die Anfrage wurde nicht gefunden.";
   if (status === 503) return "Die Datenbank ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.";
+  if (status === 422) return "Die Eingabe passt nicht zum Bewertungs-Framework.";
   return `Die Daten konnten nicht geladen werden (HTTP ${status}).`;
 }
 
@@ -59,6 +68,22 @@ async function get<T>(path: string, params?: Params, signal?: AbortSignal): Prom
   return (await res.json()) as T;
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(null, messageFor(null));
+  }
+  if (res.status === 403) throw new ApiError(403, "Du bist nicht als Prüfer:in angelegt und kannst nur lesen.");
+  if (!res.ok) throw new ApiError(res.status, messageFor(res.status));
+  return (await res.json()) as T;
+}
+
 export interface ListQuery {
   q: string;
   sort: SortField;
@@ -79,6 +104,26 @@ export const api = {
 
   aggregate: (params: { group_by: string; exclude_status?: string[]; split_multi?: boolean }, signal?: AbortSignal) =>
     get<AggregateResult>("/grid-connection-requests/aggregate", params, signal),
+
+  users: (signal?: AbortSignal) => get<User[]>("/users", undefined, signal),
+
+  /** The signed-in user (eg-auth) and their Users entry. */
+  me: (signal?: AbortSignal) => get<Me>("/users/me", undefined, signal),
+
+  myEvaluations: (signal?: AbortSignal) => get<UserEvaluations>("/users/me/evaluations", undefined, signal),
+
+  framework: (signal?: AbortSignal) => get<EvaluationCriterion[]>("/evaluation-framework", undefined, signal),
+
+  evaluation: (idGronosNew: number, signal?: AbortSignal) =>
+    get<EvaluationState>(`/grid-connection-requests/${idGronosNew}/evaluation`, undefined, signal),
+
+  history: (idGronosNew: number, signal?: AbortSignal) =>
+    get<EvaluationHistory>(`/grid-connection-requests/${idGronosNew}/evaluation-history`, undefined, signal),
+
+  // The backend takes the evaluator from the sign-in (eg-auth token).
+  // One call per "Bewertung speichern" with all changed checks.
+  saveEvaluation: (idGronosNew: number, checks: EvaluationInputItem[]) =>
+    post<{ items: EvaluationEntry[]; unchanged: number }>(`/grid-connection-requests/${idGronosNew}/evaluation-inputs`, { checks }),
 
   // The request list carries only customer_id; names come from the customer
   // resource, loaded completely once (about 120 customers).

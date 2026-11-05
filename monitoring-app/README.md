@@ -1,6 +1,6 @@
 # Monitoring-App — React
 
-Eigenes Deployment, eigene Anwendung. Konsumiert ausschließlich die read-only
+Eigenes Deployment, eigene Anwendung. Konsumiert ausschließlich die
 Backend-API (`/api/v1`, siehe `backend/README.md`); kein eigener Datenzugriff.
 Stack wie das AI-Cockpit-Frontend: React 18 + Vite + TypeScript, gleiche
 Versionen, Schrift (IBM Plex) als Dateien im Repo (`src/fonts/`, OFL-Lizenzen
@@ -27,6 +27,45 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
   (`/aggregate?group_by=request_status`) und *Aktive Leistung nach
   Technologie* (`/aggregate?group_by=generation_technology&exclude_status=Eingestellt&split_multi=true`;
   die fünf größten nach MW, Rest als „Übrige“).
+
+## Bewertung: K1 und K4
+
+Hash-Routen: ohne Hash bzw. `#/meine-bewertungen` „Meine Bewertungen“
+(Startseite), `#/` Übersicht, `#/antraege/<id>/bewertung` (K1),
+`#/antraege/<id>/verlauf` (K4). Im Detailbereich führen „Reifegrad bewerten“
+und „Verlauf“ dorthin.
+
+- **Nutzer:in = Anmeldung (OIDC):** die App fragt `GET /users/me`; das
+  Backend ordnet die E-Mail aus dem Token einem Eintrag in `Users` zu (Rolle).
+  Nur Prüfer-Rollen (Netzplanung, Flächen & Recht, Finanzen) können bewerten,
+  alle anderen lesen. Nach der Anmeldung öffnet sich „Meine Bewertungen“.
+  Lokal mit Dev-Bypass: Backend mit `EG_AUTH_DEV_EMAIL=<E-Mail aus Users>`.
+- **Meine Bewertungen** (`src/components/MyEvaluationsView.tsx`): alle
+  Anträge, die die Nutzer:in bewertet hat, zuletzt geändert zuerst, mit dem
+  eigenen zuletzt gespeicherten Reifegrad, Zahl der bewerteten Checks und
+  letzter Änderung; ein Klick öffnet K1.
+- **K1 – Spalte je Prüfer:in:** je Bewertungsgruppe (A1, A2, B1+B2, …) eine
+  Spalte pro Prüfer:in. Die eigene Spalte ist bearbeitbar (Checks aufklappen,
+  erfüllt / nicht erfüllt / offen, bei D1 abgestufte Punkte), die anderen sind
+  read-only. Abweichende Punktzahlen werden markiert. Begründungen je
+  Unterkriterium im Seitenpanel. Fußzeile: Reifegrad je Prüfer:in und
+  Spannweite.
+- **Speichern:** Klicks und Kommentare („Kommentar vormerken“) ändern nur
+  einen Entwurf; die Punktzahl rechnet sofort mit. Am Ende der Bewertung
+  stehen die Zahl der ungespeicherten Änderungen, „Verwerfen“ und
+  „Bewertung speichern“. Erst dieser Knopf sendet alle Checks, die sich vom
+  gespeicherten Stand unterscheiden, in einem Aufruf. Wer mit
+  ungespeicherten Änderungen die Seite oder die Nutzer:in wechselt, wird
+  gefragt. Der Entwurf übersteht kein Neuladen.
+- **K4 – Verlauf:** links aktueller Stand je Nutzer:in und Gruppe, rechts das
+  Änderungsprotokoll (Alles / Nur Bewertungen / Nur Begründungen), mit
+  Punktzahl vorher → nachher.
+- **Live:** der Stand wird alle 4 s neu geladen, der eigene Entwurf liegt
+  darüber und wird dabei nicht überschrieben (`src/domain/useEvaluation.ts`).
+- **Punktzahl** (`src/domain/scoring.ts`), Regeln aus der Bewertungs-Excel:
+  Mindestanforderungen müssen erfüllt sein (Alternativen: eine reicht), sonst
+  0; Punkte-Checks geben den höchsten erreichten Wert, gedeckelt auf das
+  Gruppenmaximum; Reifegrad = Σ Gewicht × Punkte/Max.
 
 ## Logik in der App (bewusst nicht im Backend)
 
@@ -97,6 +136,15 @@ ist gitignored und muss im Firmennetz erzeugt werden.
 - **C4C-URL-Schema** und ob `document_url` künftig echte ELO-Links enthält.
 
 ## Verifiziert
+
+34 Tests (05.11.2026, mit eg-auth: Nutzer:in aus `GET /users/me`), zusätzlich: Punkteregeln (Mindestanforderungen,
+Alternativen, Deckelung, abgestufte Punkte, Reifegrad), Abweichungen,
+Verlaufs-Replay, K1 (eigene Spalte bearbeitbar, fremde read-only, Entwurf,
+nur Delta mit Kommentaren in einem Aufruf, Verwerfen), „Meine Bewertungen“,
+Routen und Rückfrage beim Verlassen.
+Im Browser gegen eine Demo-DB mit drei Prüfer:innen geprüft.
+
+### Früherer Stand (13.10.2026)
 
 16 Tests (Prozessschritt, Phasen-Gruppierung inkl. unbekannter Status,
 Status-Farben, Top-5-Technologien, C4C-/ELO-Links, Query-Parameter, Liste mit

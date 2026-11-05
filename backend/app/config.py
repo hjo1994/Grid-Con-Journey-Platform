@@ -13,6 +13,22 @@ def get_db_path() -> Path:
     return Path(os.environ.get("GRID_CON_DB_PATH", "/data/db/grid_con.db"))
 
 
+# BronzeToGold is triggered after every saved evaluation (best effort; without
+# AIRFLOW_API_URL only its schedule applies). Airflow 2.10 (platform): REST API
+# v1, Bearer token or basic auth. Airflow 3 (local): v2 with /auth/token.
+AIRFLOW_GOLD_DAG_ID = os.environ.get("GRID_CON_GOLD_DAG_ID", "grid_con_bronze_to_gold")
+
+
+def airflow_settings() -> dict:
+    return {
+        "url": os.environ.get("AIRFLOW_API_URL", "").rstrip("/"),
+        "api_version": os.environ.get("AIRFLOW_API_VERSION", "v1").strip().lower(),
+        "token": os.environ.get("AIRFLOW_API_TOKEN", ""),
+        "username": os.environ.get("AIRFLOW_API_USERNAME", ""),
+        "password": os.environ.get("AIRFLOW_API_PASSWORD", ""),
+    }
+
+
 # Process order and phases of RequestStatus. Not stored in the database, so it
 # lives here. PENDING: business confirmation of the order (taken from the
 # approved monitoring mockup). Statuses outside the process ("Offen",

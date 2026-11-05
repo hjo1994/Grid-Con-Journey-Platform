@@ -1,10 +1,11 @@
 # Backend — FastAPI + SQLAlchemy
 
-Eigenes Deployment. Stellt die Silver-Tabellen der zentralen Datenbank über
-eine **read-only** REST-API bereit. Die Endpunkte bilden Ressourcen ab, keine
-Ansichten einer bestimmten App: Darstellungslogik (Prozessschritt,
-C4C-Deeplink, Widget-Zuschnitt) rechnet der jeweilige Konsument. Kein
-Schreibpfad.
+Eigenes Deployment. Stellt die Silver-, Gold- und Config-Tabellen der
+zentralen Datenbank über eine REST-API bereit. Die Endpunkte bilden
+Ressourcen ab, keine Ansichten einer bestimmten App: Darstellungslogik
+(Prozessschritt, C4C-Deeplink, Widget-Zuschnitt, Punktzahl) rechnet der
+jeweilige Konsument. Einziger Schreibpfad: Bewertungseingaben nach Bronze
+(`UserEvaluationInputs`).
 
 Interaktive Doku: `/api/docs` (Swagger UI offline aus `swagger-ui-bundle`,
 ohne CDN, `app/docs.py`), Schema unter `/api/openapi.json` (OpenAPI 3.0.3).
@@ -24,6 +25,13 @@ Beides ohne Anmeldung.
 | `GET /meta` | `api_version`, `data_as_of` |
 | `GET /api/healthz` | Liveness, ohne Auth, prüft nicht die DB |
 | `GET /api/auth/rights` | angemeldeter Nutzer und seine Rechte (für das Frontend) |
+| `GET /users` | Nutzer:innen mit `role` (`netzplanung`, `flaechen_recht`, `finanzen`, `viewer`), `can_evaluate` |
+| `GET /users/me` | angemeldete Nutzer:in (E-Mail, Name aus dem Token) und ihr `Users`-Eintrag (`user`, `null` = nicht angelegt, nur lesen) |
+| `GET /users/me/evaluations` | „Meine Bewertungen“: alle von mir bewerteten Anträge mit meinen aktuellen Check-Ergebnissen, zuletzt geändert zuerst |
+| `GET /evaluation-framework` | Kriterien → Unterkriterien → Checks (Gewicht, `scoring_group`, `max_score`, `check_type`, `points`, `graded`, `alternative_group`) |
+| `GET /grid-connection-requests/{id}/evaluation` | aktueller Stand je Prüfer:in und Check (`verdict`, `score`, `comment`, `version`, `pending`) und die Prüfer:innen |
+| `GET /grid-connection-requests/{id}/evaluation-history` | Verlauf, neueste zuerst, mit Vorwert; `kind=all\|ratings\|comments`, `scoring_group`, `user_id` |
+| `POST /grid-connection-requests/{id}/evaluation-inputs` | ein oder mehrere Checks der angemeldeten Prüfer:in speichern; nicht angelegt oder Rolle `viewer`: `403`, ungültig: `422`, sonst `201` |
 
 **Feldnamen:** die Silver-Spalten in snake_case (`RequestStatus` →
 `request_status`, `maxP` → `max_p`, `CustomerID` → `customer_id`). Zeitstempel
@@ -61,6 +69,28 @@ die Doku nicht. Gesteuert über `EG_AUTH_DEV_MODE` und `EG_AUTH_DEV_GROUPS`
 - Getestet gegen den **Stub** (Gating, 401 ohne Anmeldung, Rechte aus
   Gruppen). Das Verhalten des echten `eg-auth` ist nicht geprüft.
 
+## Bewertung (K1/K4)
+
+- **Wer bewertet:** die angemeldete Nutzer:in. Ihre E-Mail aus dem Token
+  (`UserInfo.email`) wird in `Users.Email` gesucht (ohne Groß-/Kleinschreibung);
+  die Rolle dort entscheidet. Nutzer:innen legt Input Orchestration an
+  (`migrations/evaluation.py --users users.csv`).
+- **Schreiben:** `POST …/evaluation-inputs` hängt je Check eine Zeile an
+  `UserEvaluationInputs` an (`BEGIN IMMEDIATE`, Zeitstempel streng monoton)
+  und löst danach im Hintergrund den DAG `grid_con_bronze_to_gold` aus
+  (`AIRFLOW_API_*`, best effort).
+- **Lesen live:** Stand = Gold (`RequestEvaluationChecks`) plus alle Eingaben
+  nach der Gold-Wasserlinie (`pending: true`), mit derselben Delta-Regel wie
+  der DAG (gleicher Wert ohne neuen Kommentar zählt nicht). Eine gespeicherte
+  Bewertung ist sofort für alle sichtbar.
+
+| Variable | Zweck |
+|---|---|
+| `AIRFLOW_API_URL` | Basis-URL von Airflow; leer = kein Auslösen (nur Zeitplan des DAGs) |
+| `AIRFLOW_API_VERSION` | `v1` (Airflow 2.10, Standard) oder `v2` (Airflow 3) |
+| `AIRFLOW_API_TOKEN` oder `AIRFLOW_API_USERNAME`/`AIRFLOW_API_PASSWORD` | Bearer-Token bzw. Basic Auth (v1 braucht das API-Backend `basic_auth`) |
+| `GRID_CON_GOLD_DAG_ID` | Standard `grid_con_bronze_to_gold` |
+
 ## Status-Konfiguration
 
 Reihenfolge und Phasen stehen in `app/config.py` (`PROCESS_PHASES`,
@@ -76,9 +106,12 @@ noch aus.**
 
 Wie im AI-Cockpit-Backend:
 
-- Die Datei wird auf SQLite-Ebene `mode=ro` geöffnet (getestet).
-- **Kein Connection-Pool** (`NullPool`): Input Orchestration ersetzt die Datei
-  per atomarem Rename, jede Anfrage öffnet sie neu (getestet).
+- Lesende Anfragen öffnen die Datei auf SQLite-Ebene `mode=ro` (getestet);
+  nur der Bewertungs-POST nutzt eine eigene `mode=rw`-Engine. Das Volume muss
+  deshalb **schreibbar** gemountet sein.
+- **Kein Connection-Pool** (`NullPool`): jede Anfrage öffnet die Datei neu.
+  Input Orchestration schreibt in place in Transaktionen; `timeout=10` als
+  `busy_timeout`.
 - Schlägt das Öffnen fehl, 3 Versuche mit kurzem Backoff, danach `503` +
   `Retry-After` (getestet mit fehlender Datei).
 
@@ -93,18 +126,20 @@ backend/
     auth.py          # eg-auth: Rights, authorizer(), /api/auth/rights
     docs.py          # Swagger UI offline unter /api/docs
     config.py        # GRID_CON_DB_PATH (Default /data/db/grid_con.db), Status-Katalog
-    db.py            # read-only Engine, Session mit Retry
-    models.py        # Kopie der Silver-Modelle aus input-orchestration (von Hand synchron halten)
+    db.py            # Engine (ro/rw), Session mit Retry
+    models.py        # Kopie der Modelle aus input_orchestration (von Hand synchron halten)
+    evaluation.py    # Bewertungsstand (Gold + ausstehende Eingaben), Schreiben, DAG-Trigger
     queries.py       # gemeinsame Filter, "neuester Eintrag je Ticket"
     schemas.py
-    api/requests.py, api/customers.py, api/reference.py
+    api/requests.py, api/customers.py, api/reference.py, api/evaluation.py
   local_stubs/eg_auth/     # Stub von eg-auth, nur lokal
   tests/             # synthetische Test-DB, keine echten Daten
 ```
 
-`app/models.py` ist eine von Hand gepflegte Kopie des Silver-Teils von
+`app/models.py` ist eine von Hand gepflegte Kopie der benötigten Tabellen aus
 `grid_con_ingestion/models.py` im Branch `dedicated_env/input_orchestration`
-(separate Deployments, kein gemeinsames Paket). Bronce (`C4CExports`) liest das Backend nicht.
+(separate Deployments, kein gemeinsames Paket). Von Bronze kennt das Backend
+nur `UserEvaluationInputs`.
 
 ## Lokal starten
 
@@ -112,6 +147,7 @@ backend/
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-local.txt
 EG_AUTH_DEV_MODE=True EG_AUTH_DEV_GROUPS='["app_50hzt_aap_communities_all__x"]' \
+EG_AUTH_DEV_EMAIL=finanzen@example.invalid \
 GRID_CON_DB_PATH=/pfad/zu/grid_con.db \
   .venv/bin/uvicorn app.main:app --port 8000
 .venv/bin/python -m pytest
@@ -119,7 +155,8 @@ GRID_CON_DB_PATH=/pfad/zu/grid_con.db \
 
 Startkommando im Deployment:
 `uvicorn app.main:app --host 0.0.0.0 --port 8000` (ohne `PYTHONPATH`).
-ConfigMap: `GRID_CON_DB_PATH` (Volume read-only), `EG_AUTH_DEV_MODE=False`. Die `poetry.lock` fehlt noch
+ConfigMap: `GRID_CON_DB_PATH` (Volume **schreibbar**), `EG_AUTH_DEV_MODE=False`,
+`AIRFLOW_API_URL` (+ Token oder Benutzer/Passwort als Secret). Die `poetry.lock` fehlt noch
 und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
 
 ## Offen
@@ -133,6 +170,13 @@ und muss wie beim AI Cockpit im Firmennetz mit Poetry 1.8.5 erzeugt werden.
   neuesten (Projekt-0002).
 
 ## Verifiziert
+
+05.11.2026: 41 Tests, davon 11 zur Bewertung (Framework, Nutzer:innen,
+`/users/me` mit E-Mail-Zuordnung, Stand aus Gold + ausstehenden Eingaben
+über Silver-Stände, Verlauf, Delta-Regel, 401/403/422, „Meine Bewertungen“,
+Airflow-2-Trigger mit Basic Auth). Gegen den eg-auth-Stub; ob das echte
+`eg-auth` `UserInfo.email` liefert, ist nicht geprüft.
+
 
 27 Tests gegen eine synthetische Test-DB (aktueller Stand vs. Historie,
 alle Filter, Suche inkl. `%`/`_`-Escaping, Sortierung nach Prozessreihenfolge

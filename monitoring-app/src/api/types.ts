@@ -86,3 +86,109 @@ export interface Meta {
 
 export type SortField = "id_gronos_new" | "id_gronos_old" | "customer_name" | "generation_technology" | "max_p" | "request_status";
 export type SortOrder = "asc" | "desc";
+
+// Collaborative evaluation (K1/K4), see backend/app/api/evaluation.py.
+
+export interface User {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  role_label: string;
+  can_evaluate: boolean;
+}
+
+export interface EvaluationCheck {
+  id: string;
+  description: string | null;
+  check_type: "minimum" | "points";
+  points: number;
+  graded: boolean;
+  alternative_group: string | null;
+  document_category: string | null;
+}
+
+export interface EvaluationSubCriterion {
+  id: string;
+  name: string;
+  scoring_group: string;
+  scoring_group_name: string;
+  max_score: number;
+  question: string | null;
+  checks: EvaluationCheck[];
+}
+
+export interface EvaluationCriterion {
+  id: string;
+  name: string;
+  weight: number;
+  sub_criteria: EvaluationSubCriterion[];
+}
+
+export type Verdict = "fulfilled" | "not_fulfilled" | "open";
+
+export interface EvaluationEntry {
+  id: string;
+  user_id: string;
+  evaluation_check_id: string;
+  verdict: Verdict;
+  score: number | null;
+  comment: string | null;
+  version: number;
+  timestamp: string;
+  pending: boolean;
+}
+
+export interface EvaluationState {
+  id_gronos_new: number;
+  grid_connection_request_id: string;
+  evaluators: User[];
+  checks: EvaluationEntry[];
+  last_change: string | null;
+}
+
+export interface HistoryEntry extends EvaluationEntry {
+  action: "rated" | "changed" | "commented";
+  previous_verdict: Verdict | null;
+  previous_score: number | null;
+  sub_criterion_id: string;
+  scoring_group: string;
+}
+
+export interface EvaluationHistory {
+  id_gronos_new: number;
+  items: HistoryEntry[];
+  total: number;
+}
+
+export interface EvaluationInputItem {
+  evaluation_check_id: string;
+  verdict: Verdict;
+  score?: number | null;
+  comment?: string | null;
+}
+
+/** "Meine Bewertungen": one request the user has evaluated with their current results. */
+export interface UserEvaluationItem {
+  id_gronos_new: number;
+  id_gronos_old: string | null;
+  generation_technology: string | null;
+  max_p: number | null;
+  request_status: string | null;
+  checks: EvaluationEntry[];
+  last_change: string;
+  pending: boolean;
+}
+
+export interface UserEvaluations {
+  user: User;
+  items: UserEvaluationItem[];
+  total: number;
+}
+
+/** GET /users/me: the signed-in user; `user` is null when not registered in Users (read-only). */
+export interface Me {
+  email: string;
+  name: string | null;
+  user: User | null;
+}

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, ApiError, type ListQuery } from "./api/client";
-import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField } from "./api/types";
+import type { AggregateResult, Customer, GridConnectionRequest, RequestPage, RequestStatus, SortField, Me } from "./api/types";
 import { DetailPanel } from "./components/DetailPanel";
+import { EvaluationView } from "./components/EvaluationView";
+import { HistoryView } from "./components/HistoryView";
+import { MyEvaluationsView } from "./components/MyEvaluationsView";
 import { Pager, RequestTable } from "./components/RequestTable";
 import { ErrorNote } from "./components/small";
 import { StatusWidget, TechWidget } from "./components/Widgets";
 import { fmtShortDateTime } from "./domain/format";
+import { hrefOf, mayLeave, useRoute } from "./domain/route";
 import { groupByPhase, STOPPED_STATUS } from "./domain/status";
 import { techShares } from "./domain/technology";
 
@@ -28,8 +32,83 @@ function latest(...values: (string | null | undefined)[]): string | null {
   return values.filter((v): v is string => !!v).sort().at(-1) ?? null;
 }
 
+// The signed-in user (eg-auth) and their entry in Users (role). Only users
+// with an evaluator role may evaluate; everyone else reads.
+function useMe() {
+  const [me, setMe] = useState<Me | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.me().then(setMe).catch((err) => setError(errorText(err)));
+  }, []);
+  return { me, user: me?.user ?? null, error };
+}
+
 /** `signOut`: show the sign-out link (only behind the OIDC login, see AuthApp.tsx). */
 export default function App({ signOut = false }: { signOut?: boolean }) {
+  const route = useRoute();
+  const { me, user, error: meError } = useMe();
+  const [asOf, setAsOf] = useState<string | null>(null);
+
+  return (
+    <div className="app">
+      <header className="bar">
+        <span className="brand">
+          GRID CON <i>Monitoring</i>
+        </span>
+        <nav>
+          <a href={hrefOf({ page: "mine" })} className={route.page === "mine" ? "on" : undefined}>
+            Meine Bewertungen
+          </a>
+          <a href="#/" className={route.page === "overview" ? "on" : undefined}>
+            Übersicht
+          </a>
+          {(route.page === "evaluation" || route.page === "history") && (
+            <a href={hrefOf(route)} className="on">
+              {route.page === "history" ? "Verlauf" : "Bewertung"}
+            </a>
+          )}
+        </nav>
+        <span className="sync">
+          {route.page === "overview" ? (
+            <>
+              Datenstand <b className={asOf ? "" : "unknown"}>●</b> {asOf ?? "unbekannt"}
+            </>
+          ) : (
+            me && (
+              <span className="me">
+                angemeldet als <b>{me.name ?? me.email}</b>
+                {user ? <> · {user.role_label} · {user.can_evaluate ? "zur Bewertung berechtigt" : "nur lesend"}</> : " · nur lesend"}
+              </span>
+            )
+          )}
+        </span>
+        {signOut && (
+          <a className="signout" href="/logout" onClick={(e) => !mayLeave() && e.preventDefault()}>
+            Abmelden
+          </a>
+        )}
+      </header>
+      {meError && <ErrorNote message={meError} />}
+      {route.page === "mine" ? (
+        <main className="body">
+          <MyEvaluationsView me={user} />
+        </main>
+      ) : route.page === "evaluation" ? (
+        <main className="body">
+          <EvaluationView key={route.id} id={route.id} me={user} />
+        </main>
+      ) : route.page === "history" ? (
+        <main className="body">
+          <HistoryView key={route.id} id={route.id} me={user} />
+        </main>
+      ) : (
+        <Overview onAsOf={setAsOf} />
+      )}
+    </div>
+  );
+}
+
+function Overview({ onAsOf }: { onAsOf: (asOf: string | null) => void }) {
   const [ref, setRef] = useState<Reference | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
 
@@ -93,26 +172,9 @@ export default function App({ signOut = false }: { signOut?: boolean }) {
     }));
 
   const asOf = fmtShortDateTime(latest(page?.data_as_of, ref?.byStatus.data_as_of, ref?.byTech.data_as_of));
+  useEffect(() => onAsOf(asOf), [asOf, onAsOf]);
 
   return (
-    <div className="app">
-      <header className="bar">
-        <span className="brand">
-          GRID CON <i>Monitoring</i>
-        </span>
-        <nav>
-          <span className="on">Übersicht</span>
-        </nav>
-        <span className="sync">
-          Datenstand <b className={asOf ? "" : "unknown"}>●</b> {asOf ?? "unbekannt"}
-        </span>
-        {signOut && (
-          <a className="signout" href="/logout">
-            Abmelden
-          </a>
-        )}
-      </header>
-
       <main className="body">
         <div className="toolbar">
           <h2>Anfragen</h2>
@@ -162,6 +224,5 @@ export default function App({ signOut = false }: { signOut?: boolean }) {
           )
         )}
       </main>
-    </div>
   );
 }

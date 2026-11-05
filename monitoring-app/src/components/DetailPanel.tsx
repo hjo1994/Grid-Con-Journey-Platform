@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { Customer, GridConnectionRequest, RequestStatus } from "../api/types";
 import { fmtCoordinates, fmtDate, fmtDateTime, fmtMW, fmtYesNo } from "../domain/format";
 import { c4cTicketUrl, documentHref, documentNames, mapUrl } from "../domain/links";
+import { hrefOf } from "../domain/route";
 import { progressOf } from "../domain/status";
 import { StatusPill } from "./small";
 
@@ -51,6 +52,17 @@ export function DetailPanel({ request: r, customer, catalogue }: Props) {
           <span className="num">{fmtMW(r.max_p)} MW</span>
         </div>
       </div>
+
+      {r.id_gronos_new !== null && (
+        <div className="links">
+          <a className="lk primary-lk" href={hrefOf({ page: "evaluation", id: r.id_gronos_new })}>
+            Reifegrad bewerten
+          </a>
+          <a className="lk" href={hrefOf({ page: "history", id: r.id_gronos_new })}>
+            Verlauf
+          </a>
+        </div>
+      )}
 
       <div className="sec">
         <div className="lbl">Prozessfortschritt</div>

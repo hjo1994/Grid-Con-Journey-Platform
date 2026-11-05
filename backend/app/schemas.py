@@ -7,6 +7,7 @@ JSON keys are the Silver column names in snake_case (``RequestStatus`` →
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -128,3 +129,133 @@ class Meta(BaseModel):
     @classmethod
     def data_as_of_utc(cls, value):
         return _as_utc(value)
+
+
+# --------------------------------------------------------------------------- #
+# Collaborative evaluation
+# --------------------------------------------------------------------------- #
+class UserOut(BaseModel):
+    id: str
+    email: str
+    name: str | None
+    role: str
+    role_label: str
+    can_evaluate: bool
+
+
+class CheckOut(BaseModel):
+    id: str
+    description: str | None
+    check_type: str = Field(description="minimum = Mindestanforderung, points = bringt Punkte")
+    points: int
+    graded: bool = Field(description="Prüfer:in wählt 1 … points statt fester Punkte")
+    alternative_group: str | None = Field(description="Checks derselben Gruppe sind Alternativen ('oder')")
+    document_category: str | None
+
+
+class SubCriterionOut(BaseModel):
+    id: str
+    name: str
+    scoring_group: str
+    scoring_group_name: str
+    max_score: int = Field(description="Höchstpunktzahl der Scoring-Gruppe")
+    question: str | None
+    checks: list[CheckOut]
+
+
+class CriterionOut(BaseModel):
+    id: str
+    name: str
+    weight: float
+    sub_criteria: list[SubCriterionOut]
+
+
+class EvaluationEntryOut(BaseModel):
+    id: str
+    user_id: str
+    evaluation_check_id: str
+    verdict: str = Field(description="fulfilled | not_fulfilled | open")
+    score: float | None
+    comment: str | None
+    version: int
+    timestamp: datetime
+    pending: bool = Field(description="Eingabe gespeichert, von BronzeToGold noch nicht verarbeitet")
+
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_utc(cls, value):
+        return _as_utc(value)
+
+
+class EvaluationState(BaseModel):
+    id_gronos_new: int
+    grid_connection_request_id: str = Field(description="Aktueller Silver-Stand, auf den neue Eingaben zeigen")
+    evaluators: list[UserOut]
+    checks: list[EvaluationEntryOut] = Field(description="Aktueller Stand je Nutzer:in und Check")
+    last_change: datetime | None
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class HistoryEntryOut(EvaluationEntryOut):
+    action: str = Field(description="rated | changed | commented")
+    previous_verdict: str | None
+    previous_score: float | None
+    sub_criterion_id: str
+    scoring_group: str
+
+
+class EvaluationHistory(BaseModel):
+    id_gronos_new: int
+    items: list[HistoryEntryOut] = Field(description="Neueste zuerst")
+    total: int
+
+
+class EvaluationInputItem(BaseModel):
+    evaluation_check_id: str
+    verdict: Literal["fulfilled", "not_fulfilled", "open"]
+    score: float | None = Field(default=None, description="Nur für Checks mit graded=true")
+    comment: str | None = Field(default=None, max_length=4000)
+
+
+class EvaluationInputBody(BaseModel):
+    checks: list[EvaluationInputItem] = Field(min_length=1, max_length=100)
+
+
+class EvaluationInputResult(BaseModel):
+    items: list[EvaluationEntryOut] = Field(description="Nur Eingaben, die etwas ändern (Delta)")
+    unchanged: int = Field(default=0, description="Eingaben ohne Änderung gegenüber dem aktuellen Stand")
+    gold_triggered: bool = Field(description="BronzeToGold wurde über die Airflow-API angestoßen")
+
+
+class UserEvaluationItem(BaseModel):
+    id_gronos_new: int
+    id_gronos_old: str | None
+    generation_technology: str | None
+    max_p: float | None = Field(description="MW")
+    request_status: str | None
+    checks: list[EvaluationEntryOut] = Field(description="Aktueller Stand der Nutzer:in je Check")
+    last_change: datetime
+    pending: bool = Field(description="Mindestens eine Eingabe noch nicht von BronzeToGold verarbeitet")
+
+    @field_validator("last_change")
+    @classmethod
+    def last_change_utc(cls, value):
+        return _as_utc(value)
+
+
+class UserEvaluations(BaseModel):
+    user: UserOut
+    items: list[UserEvaluationItem] = Field(description="Zuletzt geänderte zuerst")
+    total: int
+
+
+class MeOut(BaseModel):
+    """The signed-in user (eg-auth) and, if registered, their Users entry."""
+
+    email: str
+    name: str | None
+    user: UserOut | None = Field(description="null = not registered in Users: may read, not evaluate")

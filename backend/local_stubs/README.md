@@ -17,11 +17,17 @@ Original, eine `Depends`-Instanz (keine nackte Funktion, sonst 422).
 `app/main.py` hängt `local_stubs` nur bei `EG_AUTH_DEV_MODE=True` selbst an den
 `sys.path`; im Cluster ist der Wert `False`.
 
+Angemeldete Nutzer:in im Dev-Modus: `EG_AUTH_DEV_EMAIL` / `EG_AUTH_DEV_NAME`
+(Standard `dev.user@example.com`). Zum Bewerten eine E-Mail aus `Users`
+setzen, z. B. `EG_AUTH_DEV_EMAIL=finanzen@example.invalid` nach
+`migrations.evaluation --demo`.
+
 Lokal starten:
 
 ```sh
 cd backend
 EG_AUTH_DEV_MODE=True EG_AUTH_DEV_GROUPS='["app_50hzt_aap_communities_all__x"]' \
+EG_AUTH_DEV_EMAIL=finanzen@example.invalid \
 GRID_CON_DB_PATH=/pfad/zu/grid_con.db \
   .venv/bin/uvicorn app.main:app --port 8000
 ```

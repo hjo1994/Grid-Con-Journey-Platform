@@ -10,13 +10,17 @@ die die Daten ausliefern, angepasst an die Plattform (Anmeldung über
 Orchestration liegt in `dedicated_env/input_orchestration`, der
 Entwicklungsstand aller Module in `main`.
 
-1. **`backend/`** — read-only FastAPI-Schnittstelle (`/api/v1`) auf die
-   Silver-Tabellen, geschützt mit `eg-auth`. Details: `backend/README.md`.
+1. **`backend/`** — FastAPI-Schnittstelle (`/api/v1`) auf Silver, Gold und
+   Config, geschützt mit `eg-auth`; schreibt nur die Bewertungseingaben nach
+   Bronze und löst danach BronzeToGold aus. Details: `backend/README.md`.
 2. **`monitoring-app/`** — React-Applikation, meldet per OIDC an
-   (`eg-auth-react`) und ruft das Backend mit Bearer-Token auf. Details:
-   `monitoring-app/README.md`.
+   (`eg-auth-react`) und ruft das Backend mit Bearer-Token auf: Übersicht,
+   „Meine Bewertungen“, K1 (Bewertung, eine Spalte je Prüfer:in) und K4
+   (Verlauf). Details: `monitoring-app/README.md`.
 
 ## Datenbank (Interim)
 
-SQLite-Datei **`/data/db/grid_con.db`**, beschrieben ausschließlich von der
-Input Orchestration (atomarer Datei-Tausch), im Backend read-only gemountet.
+SQLite-Datei **`/data/db/grid_con.db`**. Zwei Schreiber: Input Orchestration
+(Bronze, Silver, Gold, Config) und das Backend (nur `UserEvaluationInputs`),
+beide in place mit Transaktionen. Das Volume muss im Backend **schreibbar**
+gemountet sein.

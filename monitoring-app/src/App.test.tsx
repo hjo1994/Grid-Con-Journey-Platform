@@ -25,6 +25,10 @@ const ok: Responder = (url) => {
   return { status: 404 };
 };
 
+// without a hash the app opens "Meine Bewertungen"; these tests cover the overview
+beforeEach(() => {
+  window.location.hash = "#/";
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("App", () => {
