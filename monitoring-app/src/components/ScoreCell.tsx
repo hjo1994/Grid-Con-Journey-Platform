@@ -8,14 +8,12 @@ import { fmtShortDateTime } from "../domain/format";
 import { hrefOf } from "../domain/route";
 import { fmtPercent } from "../domain/scoring";
 
-/** filled = complete, partial = started, open = nothing yet, dev = differs from the others */
-export function dotState(r: ReviewerSummary): "dev" | "done" | "partial" | "open" {
-  if (r.deviates) return "dev";
-  if (r.complete) return "done";
-  return r.percent !== null ? "partial" : "open";
+/** green = the evaluator has saved an evaluation, hollow = not yet */
+export function dotState(r: ReviewerSummary): "done" | "open" {
+  return r.last_change !== null ? "done" : "open";
 }
 
-const DOT_LABEL = { dev: "weicht ab", done: "fertig", partial: "begonnen", open: "offen" } as const;
+const DOT_LABEL = { done: "bewertet", open: "noch nicht bewertet" } as const;
 
 function Popover({ s, at }: { s: EvaluationScoreSummary; at: DOMRect }) {
   // fixed, so the table's scroll container does not clip it

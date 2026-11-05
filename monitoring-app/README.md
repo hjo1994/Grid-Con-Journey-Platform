@@ -25,8 +25,8 @@ liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
   GRONOS-ID. Bei Anfragen aus dem Excel-Import bleiben diese Zeilen weg.
 - **Reifegrad** (`src/components/ScoreCell.tsx`, Entwurf E): je Zeile der
   kombinierte Reifegrad aus dem Backend (`GET /evaluation-scores`, ein Aufruf
-  je Seite) und ein Punkt je Prüfer:in: gefüllt = fertig, hell = begonnen,
-  leer = offen, orange = weicht ab. Hover oder Fokus zeigt die Werte je
+  je Seite) und ein Punkt je Prüfer:in: grün = hat eine Bewertung
+  gespeichert, leer = noch nicht. Hover oder Fokus zeigt die Werte je
   Prüfer:in, abweichende Gruppen und Kommentare; ein Klick öffnet K1. Die
   Spalte ist nicht sortierbar (das Backend sortiert und blättert, ohne
   Reifegrad-Sortierung).

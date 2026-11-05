@@ -52,7 +52,7 @@ describe("Reifegrad in the overview", () => {
     render(<App />);
     const score = await screen.findByRole("link", { name: /^Reifegrad 58 %/ });
     expect(score).toHaveAttribute("href", "#/antraege/1001/bewertung");
-    expect(score).toHaveAccessibleName("Reifegrad 58 %, NP weicht ab, RE weicht ab, FI offen");
+    expect(score).toHaveAccessibleName("Reifegrad 58 %, NP bewertet, RE bewertet, FI noch nicht bewertet");
     expect(screen.getByText("nicht bewertet")).toBeInTheDocument();
     const calls = fetch.mock.calls.map(([u]) => decodeURIComponent(String(u))).filter((u) => u.includes("/evaluation-scores"));
     expect(calls).toEqual(["/api/v1/evaluation-scores?ids=1001&ids=1002"]);
