@@ -48,9 +48,20 @@ function storedUserId(): string | null {
 // unsaved changes and then opens "Meine Bewertungen" with their latest results.
 function useCurrentUser() {
   const [users, setUsers] = useState<User[]>([]);
+  // null while loading; otherwise why there is nobody to pick
+  const [usersProblem, setUsersProblem] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(storedUserId);
   useEffect(() => {
-    api.users().then(setUsers).catch(() => setUsers([]));
+    api
+      .users()
+      .then((u) => {
+        setUsers(u);
+        setUsersProblem(u.length ? null : "Keine Nutzer:innen in der Datenbank (Tabelle Users ist leer).");
+      })
+      .catch((err) => {
+        setUsers([]);
+        setUsersProblem(`Nutzer:innen konnten nicht geladen werden: ${errorText(err)}`);
+      });
   }, []);
   const me = users.find((u) => u.id === userId) ?? users.find((u) => u.can_evaluate) ?? null;
   const choose = (id: string) => {
@@ -64,13 +75,13 @@ function useCurrentUser() {
       /* private mode: choice lasts for the session only */
     }
   };
-  return { users, me, choose };
+  return { users, me, choose, usersProblem };
 }
 
 /** `signOut`: show the sign-out link (only behind the OIDC login, see AuthApp.tsx). */
 export default function App({ signOut = false }: { signOut?: boolean }) {
   const route = useRoute();
-  const { users, me, choose } = useCurrentUser();
+  const { users, me, choose, usersProblem } = useCurrentUser();
   const [asOf, setAsOf] = useState<string | null>(null);
 
   return (
@@ -112,6 +123,7 @@ export default function App({ signOut = false }: { signOut?: boolean }) {
               </label>
             )
           )}
+          {route.page !== "overview" && usersProblem && <span className="warn-text">{usersProblem}</span>}
         </span>
         {signOut && (
           <a className="signout" href="/logout" onClick={(e) => !mayLeave() && e.preventDefault()}>

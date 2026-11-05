@@ -279,3 +279,8 @@ button.ghost:disabled { opacity: .5; cursor: default; }
 .mine-list td, .mine-list th { padding: 9px 12px; }
 .mine-list tbody tr { cursor: pointer; }
 .mine-list .total { display: flex; align-items: center; gap: 8px; }
+
+.warn-text {
+  color: var(--warn, #b45309);
+  font-size: 12px;
+}

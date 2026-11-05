@@ -108,4 +108,18 @@ describe("App", () => {
     const alerts = await screen.findAllByRole("alert");
     expect(alerts[0]).toHaveTextContent("Die Datenbank ist gerade nicht verfügbar");
   });
+
+  it("says so when there are no users to pick", async () => {
+    window.location.hash = "#/meine-bewertungen";
+    mockFetch((url) => (url.pathname.endsWith("/users") ? { status: 200, body: [] } : ok(url)));
+    render(<App />);
+    expect(await screen.findByText(/Keine Nutzer:innen in der Datenbank/)).toBeInTheDocument();
+  });
+
+  it("names the error when the users cannot be loaded", async () => {
+    window.location.hash = "#/meine-bewertungen";
+    mockFetch((url) => (url.pathname.endsWith("/users") ? { status: 404 } : ok(url)));
+    render(<App />);
+    expect(await screen.findByText(/Nutzer:innen konnten nicht geladen werden/)).toBeInTheDocument();
+  });
 });
