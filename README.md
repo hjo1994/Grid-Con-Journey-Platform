@@ -32,8 +32,8 @@ wait_for_source  ──►  raw_to_bronce  ──►  bronce_to_silver
    komplett neuen Eintrag in `GridConnectionRequests` mit neuer UUID.
 
 Alles landet in der zentralen SQLite-Datei **`/data/db/grid_con.db`**
-(`writer.py`). Gold (`silver_to_gold`, RequestDocument,
-RequestEvaluationChecks, Evaluation*) ist vorerst nicht umgesetzt.
+(`writer.py`). Gold (Bewertung) siehe „Bewertung (`dags/grid_con_bronze_to_gold_dag.py`)“;
+RequestDocument ist vorerst nicht umgesetzt.
 
 **Kunden-Stammdaten:** siehe „Lokal ausführen“.
 
@@ -58,10 +58,10 @@ gronos_raw_to_bronze     (Schedule, Standard alle 30 min)
    `Timestamp` des Abrufs, `Content` = JSON as is). API-Fehler: Task schlägt
    fehl, nichts wird geschrieben.
 2. **`bronze_to_silver`** – nach jedem erfolgreichen RawToBronze-Lauf. Liest
-   alle `GronosExports` mit `Timestamp` > `MAX(BusinessTransactions.TimestampImportBronze)`,
+   alle `GronosExports` mit `Timestamp` > `MAX(BusinessTransactions.InputBronzeTimestamp)`,
    wandelt `Content` um (`gronos/transform.py`), Kunden über `CompanyID`,
-   je Bronze-Zeile eine `BusinessTransactions`-Zeile (`TimestampImportBronze`,
-   `TimestampImportSilver`); neuer Eintrag in `GridConnectionRequests` nur bei
+   je Bronze-Zeile eine `BusinessTransactions`-Zeile (`InputBronzeTimestamp`,
+   `Timestamp`); neuer Eintrag in `GridConnectionRequests` nur bei
    geänderten Werten.
 
 | Variable | Standard | |
@@ -76,7 +76,7 @@ gronos_raw_to_bronze     (Schedule, Standard alle 30 min)
 | `GRONOS_RAW_TO_BRONZE_SCHEDULE` | `*/30 * * * *` | |
 
 `requests` kommt mit Airflow 2.10 mit (keine Änderung an `pyproject.toml`/`poetry.lock`).
-Beide DAGs schreiben über `writer.atomic_write` mit Dateisperre (`grid_con.db.lock`).
+Alle DAGs schreiben über `writer.write_transaction` (Alias `atomic_write`) direkt in die Datei, siehe „Schreibstrategie“.
 
 **Bestehende Datenbank:** `BusinessTransactions.C4CExportID` war `NOT NULL`;
 SQLite kann das nicht nachträglich ändern. Vor dem ersten GRONOS-Lauf die
@@ -84,6 +84,52 @@ Datenbank neu aufbauen (vorher Dump) und den Excel-DAG
 `grid_connection_requests_import` pausieren.
 
 Demo-Daten ohne API: `python scripts/seed_demo_gronos.py data/db/grid_con_demo.db`.
+
+## Bewertung (`dags/grid_con_bronze_to_gold_dag.py`)
+
+Kollaborative Reifegradbewertung (K1/K4 in der Monitoring-App,
+`dedicated_env/backend_app`):
+
+- **Config:** `Users` (E-Mail, Name, Rolle `netzplanung` | `flaechen_recht` |
+  `finanzen` | `viewer`) und das Framework `EvaluationCriteria` →
+  `EvaluationSubCriteria` → `EvaluationChecks` (39 Checks, Regeln aus der
+  Bewertungs-Excel, `grid_con_ingestion/evaluation_framework.py`).
+- **Bronze:** `UserEvaluationInputs` – das Backend hängt je gespeichertem
+  Check eine Zeile an (append-only, ein `Timestamp` je Speichern).
+- **Gold:** `RequestEvaluationChecks` – je Antrag (`id_gronos_new`, über alle
+  Silver-Stände), Nutzer:in und Check fortlaufende `Version`.
+- **DAG `grid_con_bronze_to_gold`**, Task `bronze_to_gold`
+  (`writer.write_gold`): liest alle Eingaben mit `Timestamp` >
+  `MAX(BusinessTransactions.InputBronzeTimestamp)` der Gold-Vorgänge. **Jede**
+  Eingabe bekommt eine `BusinessTransactions`-Zeile (`UserEvaluationInputID`,
+  `Timestamp` = Transformation, `InputBronzeTimestamp` = Eingabe). Vor dem
+  Schreiben vergleicht der DAG mit dem letzten Gold-Eintrag derselben
+  Nutzer:in und desselben Checks (`writer.input_unchanged`): ein neuer
+  Gold-Eintrag nur bei anderem Verdict/Punktwert oder neuem Kommentar.
+  Eingaben, die nicht zum Framework passen, werden übersprungen (Warnung).
+  Das Framework wird bei jedem Lauf abgeglichen.
+- **Auslösung:** das Backend nach jedem Speichern über die Airflow-REST-API
+  (`POST /api/v1/dags/grid_con_bronze_to_gold/dagRuns`); optional zusätzlich
+  `GRID_CON_GOLD_SCHEDULE` (empfohlen `*/15 * * * *` als Absicherung).
+  `max_active_runs=1`.
+
+Nutzer:innen anlegen bzw. aktualisieren (idempotent über die E-Mail; legt
+auch Schema und Framework an):
+
+```bash
+python -m grid_con_ingestion.migrations.evaluation /data/db/grid_con.db --users users.csv
+```
+
+`users.csv` mit Kopfzeile `email,name,role`. `--demo` legt vier
+Beispiel-Nutzer:innen an (nur lokal).
+
+| Variable | Standard | |
+|---|---|---|
+| `GRID_CON_GOLD_DAG_ID` | `grid_con_bronze_to_gold` | muss zum Backend passen |
+| `GRID_CON_GOLD_SCHEDULE` | leer (nur Auslösung) | z. B. `*/15 * * * *` |
+
+Neue DAGs starten auf der Plattform pausiert; alle drei GRONOS-/Gold-DAGs
+einschalten.
 
 ## Anpassungen an die Plattform (gegenüber `main`)
 
@@ -104,22 +150,29 @@ pyproject.toml                # Poetry: Airflow 2.10.2, polars, fastexcel, pyarr
 requirements.txt              # Info, entspricht pyproject.toml
 dags/
   grid_connection_requests_import_dag.py
+  gronos_import_dags.py       # gronos_raw_to_bronze, gronos_bronze_to_silver
+  grid_con_bronze_to_gold_dag.py
   dependency_loader.py        # Laufzeit-Installation fehlender Pakete
   .airflowignore              # dependency_loader.py ist kein DAG
 grid_con_ingestion/
   __init__.py                 # /tmp/airflow_packages in sys.path
   config.py                   # SOURCE_DIR, GRID_CON_DB_PATH etc. aus Env-Variablen
-  models.py                   # SQLAlchemy-Modelle = LogicalDataModel.drawio (Bronce + Silver)
+  models.py                   # SQLAlchemy-Modelle = LogicalDataModel.drawio (Bronze, Silver, Gold, Config)
+  evaluation_framework.py     # Kriterien, Sub-Kriterien, Checks des Reifegradverfahrens
   sources.py                  # DataSource-Interface: FileSource, ApiSource (Platzhalter)
-  writer.py                   # Bronce/Silver laden, atomarer Datei-Tausch
+  writer.py                   # Schema, Schreibtransaktion, Excel-Import, Gold (write_gold)
+  gronos/                     # GRONOS-API: client, transform, store
   migrations/
     customers.py              # Einmal-Migration der Kunden aus dem Export
+    evaluation.py             # Framework + Nutzer:innen (CSV)
   transforms/
     normalize.py              # Spaltenmapping, NULL-Handling, Validierung
   operators/
     source_sensor.py
     raw_to_bronce.py
     bronce_to_silver.py
+    gronos_raw_to_bronze.py, gronos_bronze_to_silver.py
+    bronze_to_gold.py
 tests/
 ```
 
@@ -157,16 +210,22 @@ Tests: `.venv/bin/pytest` (laufen ohne Airflow).
 | `SOURCE_DIR` | `/data/source` |
 | `SOURCE_FILENAME_GLOB` | `C4C_GRONOS_*.xlsx` |
 | `GRID_CON_DB_PATH` | `/data/db/grid_con.db` |
+| `GRID_CON_GOLD_DAG_ID`, `GRID_CON_GOLD_SCHEDULE` | siehe „Bewertung“ |
 
 ## Schreibstrategie
 
-Input Orchestration ist der einzige Schreiber, das Backend liest nur.
-`writer.py` zieht den aktiven Stand per SQLite-Backup-API in eine
-Arbeitskopie (`grid_con.new.db`), lädt dort und schaltet sie per atomarem
-`os.replace` aktiv – das Backend sieht nie einen halben Stand. Das gilt für
-RawToBronce, BronceToSilver und die Kunden-Migration gleichermaßen. Neue
-Tabellen und Spalten legt `ensure_schema` in bestehenden Datenbanken an,
-ohne vorhandene Zeilen anzufassen.
+Zwei Schreiber: Input Orchestration (Bronze, Silver, Gold, Config) und das
+Backend (nur `UserEvaluationInputs`). Deshalb schreibt `writer.write_transaction`
+**direkt in die aktive Datei** in einer Transaktion (`BEGIN IMMEDIATE`,
+`busy_timeout` 30 s, FK-Prüfung vor dem `COMMIT`, sonst `ROLLBACK`). SQLite
+serialisiert die Schreiber über die Dateisperre; Leser sehen nie einen halben
+Stand. Der frühere Datei-Tausch (Arbeitskopie + `os.replace`) hätte Eingaben
+aus dem Backend zwischen Snapshot und Tausch verloren. Das Volume muss
+deshalb auch im Backend **schreibbar** gemountet sein.
+
+Neue Tabellen und Spalten legt `ensure_schema` in bestehenden Datenbanken an,
+ohne vorhandene Zeilen anzufassen; `TimestampImportBronze`/`TimestampImportSilver`
+werden dabei in `InputBronzeTimestamp`/`Timestamp` umbenannt.
 
 Alle Primärschlüssel (`ID`) und Fremdschlüssel sind UUIDs (uuid4, als Text), vergeben im Writer.
 
@@ -184,10 +243,8 @@ Innerhalb einer Lieferung wird nicht dedupliziert: jede gültige Zeile, die
 nicht identisch zum neuesten Eintrag ihres Tickets ist, wird ein neuer
 Eintrag. Kunden werden über Name + Kontakt + E-Mail gefunden.
 
-**Offener Punkt:** Sollen die Bewertungstabellen später von einem anderen
-Deployment beschrieben werden, gibt es zwei Schreiber – dann reicht der
-Datei-Tausch nicht mehr (Änderungen zwischen Snapshot und Tausch gingen
-verloren). Spätestens dann auf eine Server-DB wechseln.
+**Offener Punkt:** SQLite mit zwei Schreibern auf einem geteilten Volume
+ist eine Übergangslösung; bei mehr Last auf eine Server-DB wechseln.
 
 ## Mapping Quelle → Datenmodell
 
@@ -220,6 +277,15 @@ Ticketnamen verschoben) werden nicht geladen und nur als Warnung im
 Task-Log ausgegeben (inkl. Ticketname).
 
 ## Verifiziert
+
+05.11.2026: 30 Tests (`tests/`, SQLAlchemy 1.4), darunter Framework gegen die
+Excel-Regeln, Nutzer-Upsert, BronzeToGold (Versionen je Nutzer:in und Check,
+Delta: unveränderte Eingaben bekommen nur eine BusinessTransaction,
+Wasserlinie, neue Silver-Stände), Umbenennung der BT-Spalten. Alle DAGs mit
+Airflow 2.10.2 geparst, `airflow dags test grid_con_bronze_to_gold` erfolgreich.
+
+### Früher (13.10.2026)
+
 
 `data/db/grid_con.db` am 13.10.2026 neu aufgebaut (Sicherungen unter
 `data/db/backup/`): 122 Kunden aus der Migration, 386 Zeilen in `C4CExports`,

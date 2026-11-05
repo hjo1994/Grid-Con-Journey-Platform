@@ -13,17 +13,17 @@ RawToBronze (:func:`raw_to_bronze`)
   Bronze, so the next run tries it again) unless 5 fail in a row.
 
 BronzeToSilver (:func:`bronze_to_silver`)
-  1. watermark = ``MAX(BusinessTransactions.TimestampImportBronze)``,
+  1. watermark = ``MAX(BusinessTransactions.InputBronzeTimestamp)``,
   2. read every ``GronosExports`` row with ``Timestamp`` > watermark
      (everything on the first run), oldest first,
   3. parse ``Content`` (gronos/transform.py), upsert the customer by
      ``CompanyID``,
   4. write one ``BusinessTransactions`` row per Bronze row
-     (``GronosExportID``, ``TimestampImportBronze`` = Bronze ``Timestamp``,
-     ``TimestampImportSilver`` = now) – also for unchanged or invalid rows,
+     (``GronosExportID``, ``InputBronzeTimestamp`` = Bronze ``Timestamp``,
+     ``Timestamp`` = now) – also for unchanged or invalid rows,
      so the watermark moves on,
   5. append a new ``GridConnectionRequests`` record (new UUID, ``timestamp``
-     = ``TimestampImportSilver``) unless its values equal the newest record
+     = ``Timestamp``) unless its values equal the newest record
      with the same ``GronosObjectID`` (same change check as the Excel import;
      ``SourceUpdatedAt`` alone does not count as a change).
 """
@@ -231,7 +231,7 @@ def raw_to_bronze(
 # --------------------------------------------------------------------------- #
 def _watermark(conn: sqlite3.Connection) -> str | None:
     return conn.execute(
-        "SELECT MAX(TimestampImportBronze) FROM BusinessTransactions WHERE GronosExportID IS NOT NULL"
+        "SELECT MAX(InputBronzeTimestamp) FROM BusinessTransactions WHERE GronosExportID IS NOT NULL"
     ).fetchone()[0]
 
 
@@ -304,7 +304,7 @@ def bronze_to_silver(db_path: str | Path) -> SilverStats:
             bt_id = _new_id()
             conn.execute(
                 "INSERT INTO BusinessTransactions "
-                "(ID, GronosExportID, TimestampImportBronze, TimestampImportSilver) VALUES (?, ?, ?, ?)",
+                "(ID, GronosExportID, InputBronzeTimestamp, Timestamp) VALUES (?, ?, ?, ?)",
                 (bt_id, export_id, bronze_ts, imported_at),
             )
             stats.business_transactions_inserted += 1

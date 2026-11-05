@@ -8,7 +8,8 @@ SOURCE_TYPE = os.environ.get("GRID_CON_SOURCE_TYPE", "file")
 SOURCE_DIR = Path(os.environ.get("SOURCE_DIR", "/data/source"))
 SOURCE_FILENAME_GLOB = os.environ.get("SOURCE_FILENAME_GLOB", "C4C_GRONOS_*.xlsx")
 
-# Zentrale SQLite-Datenbank (Volume /data/db, read-only im Backend gemountet).
+# Zentrale SQLite-Datenbank (Volume /data/db, auch im Backend schreibbar gemountet:
+# das Backend schreibt die Bewertungseingaben nach UserEvaluationInputs).
 DB_PATH = Path(os.environ.get("GRID_CON_DB_PATH", "/data/db/grid_con.db"))
 
 # Platzhalter für die spätere API-Anbindung
@@ -58,3 +59,13 @@ def gronos_client():
         max_prefix_length=GRONOS_MAX_PREFIX_LENGTH,
         use_env_proxy=GRONOS_API_USE_ENV_PROXY,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Bewertung, DAG grid_con_bronze_to_gold
+# --------------------------------------------------------------------------- #
+# Das Backend löst den DAG nach jeder gespeicherten Bewertung über die
+# Airflow-REST-API aus. Optionaler Zeitplan als Absicherung, z. B. "*/15 * * * *";
+# leer = nur auf Auslösung.
+GOLD_DAG_ID = os.environ.get("GRID_CON_GOLD_DAG_ID", "grid_con_bronze_to_gold")
+GOLD_SCHEDULE = os.environ.get("GRID_CON_GOLD_SCHEDULE", "").strip() or None

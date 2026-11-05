@@ -1,5 +1,5 @@
 """BronzeToSilver (GRONOS-API): verarbeitet alle GronosExports-Zeilen seit dem
-letzten Lauf (Timestamp > MAX(BusinessTransactions.TimestampImportBronze)).
+letzten Lauf (Timestamp > MAX(BusinessTransactions.InputBronzeTimestamp)).
 
 Logik in grid_con_ingestion/gronos/store.py (bronze_to_silver).
 """

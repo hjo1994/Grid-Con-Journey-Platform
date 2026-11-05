@@ -11,13 +11,13 @@
   objectIds und solche mit neuerem updatedAt als in Bronze und haengt sie
   as is (JSON) mit Timestamp an GronosExports an.
 * bronze_to_silver: verarbeitet alle GronosExports mit Timestamp nach dem
-  letzten Lauf (MAX(BusinessTransactions.TimestampImportBronze)), wandelt
+  letzten Lauf (MAX(BusinessTransactions.InputBronzeTimestamp)), wandelt
   sie um und haengt sie an GridConnectionRequests an.
 
 Ein abgeschlossener RawToBronze-Lauf loest BronzeToSilver aus, auch wenn er
 nichts Neues gefunden hat (dann verarbeitet BronzeToSilver nichts). Durch
 wait_for_completion + max_active_runs=1 ueberschneiden sich die Laeufe nicht;
-writer.atomic_write sperrt die Datenbank zusaetzlich fuer manuelle Laeufe.
+writer.write_transaction (BEGIN IMMEDIATE) serialisiert zusaetzlich manuelle Laeufe.
 """
 from __future__ import annotations
 

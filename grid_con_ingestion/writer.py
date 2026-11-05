@@ -1,12 +1,12 @@
 """Schreibt Bronce und Silver in die zentrale SQLite-Datei.
 
-Wie im AI-Cockpit-Referenzprojekt ist Input Orchestration der einzige
-Schreiber, das Backend liest nur. Damit das Backend nie einen halb
-geschriebenen Stand sieht, läuft jeder Schreibvorgang über
-:func:`atomic_write`:
-  1. der aktuelle Stand wird per SQLite-Backup-API in eine Arbeitskopie gezogen,
-  2. dort das Schema sichergestellt und geladen,
-  3. die Arbeitskopie per atomarem ``os.replace`` aktiv geschaltet.
+Zwei Schreiber: Input Orchestration (Bronze, Silver, Gold, Config) und das
+Backend (nur ``UserEvaluationInputs``, die Eingaben der Prüfer:innen). Jeder
+Schreibvorgang läuft deshalb direkt auf der aktiven Datei in einer
+Transaktion (:func:`write_transaction`, ``BEGIN IMMEDIATE`` +
+``busy_timeout``). Der frühere Datei-Tausch (Arbeitskopie + ``os.replace``)
+hätte Eingaben aus dem Backend zwischen Snapshot und Tausch verloren. Leser
+sehen dank der Transaktion nie einen halben Stand.
 
 Bronce (:func:`write_bronce`)
   Der Export wird as is in ``C4CExports`` angehängt, je Lieferung mit
@@ -37,14 +37,12 @@ Schlüssel
 """
 from __future__ import annotations
 
-import fcntl
 import logging
-import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -101,14 +99,51 @@ def _quote(name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Schema und atomares Schreiben
+# Schema und transaktionales Schreiben
 # --------------------------------------------------------------------------- #
+SQLITE_TIMEOUT_SECONDS = 30.0
+
+# Umbenannte Spalten (alt → neu), werden in bestehenden Datenbanken nachgezogen.
+_RENAMED_COLUMNS = {
+    "BusinessTransactions": {"TimestampImportBronze": "InputBronzeTimestamp", "TimestampImportSilver": "Timestamp"},
+}
+
+
+def connect(db_path: str | Path) -> sqlite3.Connection:
+    """Verbindung für Schreiber: Autocommit-Modus, Transaktionen explizit."""
+    conn = sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS, isolation_level=None)
+    conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_TIMEOUT_SECONDS * 1000)}")
+    return conn
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({_quote(table)})")}
+
+
+def _rename_columns(conn: sqlite3.Connection) -> None:
+    for table, renames in _RENAMED_COLUMNS.items():
+        existing = _columns(conn, table)
+        for old, new in renames.items():
+            if old in existing and new not in existing:
+                conn.execute(f"ALTER TABLE {_quote(table)} RENAME COLUMN {_quote(old)} TO {_quote(new)}")
+                log.info("%s: Spalte %s in %s umbenannt", table, old, new)
+
+
 def ensure_schema(db_path: str | Path) -> None:
     """Legt fehlende Tabellen an und ergänzt neue Spalten/Indizes in bestehenden.
 
-    Neue Spalten sind nullable, bestehende Zeilen und IDs bleiben erhalten.
+    Neue Spalten sind nullable, bestehende Zeilen und IDs bleiben erhalten;
+    umbenannte Spalten werden vorher umbenannt.
     """
-    engine = create_engine(f"sqlite:///{db_path}")
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect(db_path)
+    try:
+        _rename_columns(conn)
+    finally:
+        conn.close()
+
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"timeout": SQLITE_TIMEOUT_SECONDS})
     try:
         Base.metadata.create_all(engine)
         with engine.begin() as conn:
@@ -132,64 +167,34 @@ def ensure_schema(db_path: str | Path) -> None:
 
 
 @contextmanager
-def _writer_lock(db_path: Path) -> Iterator[None]:
-    """Exklusive Sperre je Datenbank (Datei ``<db>.lock``).
+def write_transaction(db_path: str | Path) -> Iterator[sqlite3.Connection]:
+    """Schema sicherstellen → ``BEGIN IMMEDIATE`` → laden → FK-Prüfung → COMMIT.
 
-    RawToBronze und BronzeToSilver sind getrennte DAGs; ohne Sperre könnte
-    ein Lauf den Tausch des anderen überschreiben (beide arbeiten auf einer
-    Kopie). Wartet, bis der andere Schreiber fertig ist.
+    Schreibt direkt in die aktive Datei. SQLite serialisiert die Schreiber
+    (DAGs und Backend) über die Dateisperre, ``busy_timeout`` lässt den
+    zweiten warten. Bei einem Fehler wird alles zurückgerollt.
     """
-    with open(db_path.with_name(db_path.name + ".lock"), "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
-
-
-@contextmanager
-def atomic_write(db_path: str | Path) -> Iterator[sqlite3.Connection]:
-    """Sperre → Arbeitskopie → Schema → Transaktion → FK-Prüfung → atomarer Tausch."""
     db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with _writer_lock(db_path):
-        with _atomic_write_unlocked(db_path) as conn:
-            yield conn
-
-
-@contextmanager
-def _atomic_write_unlocked(db_path: Path) -> Iterator[sqlite3.Connection]:
-    tmp_path = db_path.with_name(db_path.stem + ".new" + db_path.suffix)
-    tmp_path.unlink(missing_ok=True)
-
-    # 1. konsistenter Snapshot des aktiven Stands
-    if db_path.exists():
-        src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        dst = sqlite3.connect(tmp_path)
-        try:
-            src.backup(dst)
-        finally:
-            src.close()
-            dst.close()
-
-    # 2. Schema + Laden in der Arbeitskopie
-    ensure_schema(tmp_path)
-    conn = sqlite3.connect(tmp_path)
+    ensure_schema(db_path)
+    conn = connect(db_path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
-        with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
             yield conn
-        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
-        if violations:
-            raise RuntimeError(f"Foreign-Key-Verletzungen: {violations[:5]}")
-    except BaseException:
+            violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(f"Foreign-Key-Verletzungen: {violations[:5]}")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
         conn.close()
-        tmp_path.unlink(missing_ok=True)
-        raise
-    conn.close()
 
-    # 3. atomarer Tausch – Backend sieht nie einen halben Stand
-    os.replace(tmp_path, db_path)
+
+# Bisheriger Name, von GRONOS-Store, Migrationen und Tests verwendet.
+atomic_write = write_transaction
 
 
 # --------------------------------------------------------------------------- #
@@ -315,7 +320,9 @@ def _load_requests(conn: sqlite3.Connection, requests: pl.DataFrame, stats: Load
 
         bt_id = _new_id()
         conn.execute(
-            "INSERT INTO BusinessTransactions (ID, C4CExportID) VALUES (?, ?)", (bt_id, row["C4CExportID"])
+            "INSERT INTO BusinessTransactions (ID, C4CExportID, Timestamp, InputBronzeTimestamp) "
+            "VALUES (?, ?, ?, (SELECT Timestamp FROM C4CExports WHERE ID = ?))",
+            (bt_id, row["C4CExportID"], loaded_at, row["C4CExportID"]),
         )
         stats.business_transactions_inserted += 1
 
@@ -341,3 +348,155 @@ def write_silver(db_path: str | Path, file_sha: str) -> LoadStats:
         stats.rows_rejected = result.rejected.height
         _load_requests(conn, result.requests, stats)
     return stats
+
+
+def _watermark(conn: sqlite3.Connection, source_column: str) -> str | None:
+    """InputBronzeTimestamp des letzten verarbeiteten Bronze-Eintrags einer Quelle."""
+    return conn.execute(
+        f"SELECT MAX(InputBronzeTimestamp) FROM BusinessTransactions WHERE {_quote(source_column)} IS NOT NULL"
+    ).fetchone()[0]
+
+
+# --------------------------------------------------------------------------- #
+# Bewertungen – Gold
+# --------------------------------------------------------------------------- #
+@dataclass
+class GoldStats:
+    inputs: int = 0
+    business_transactions_inserted: int = 0
+    checks_inserted: int = 0
+    rows_unchanged: int = 0
+    rows_rejected: int = 0
+    previous_input_bronze_timestamp: str | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+def next_input_timestamp(conn: sqlite3.Connection) -> str:
+    """Timestamp für neue UserEvaluationInputs: jetzt, aber streng größer als
+    jeder vorhandene. Innerhalb einer Schreibtransaktion aufrufen; so kann
+    keine Eingabe hinter der Wasserlinie von BronzeToGold landen. Gegenstück
+    im Backend: app/evaluation.py."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    last = conn.execute("SELECT MAX(Timestamp) FROM UserEvaluationInputs").fetchone()[0]
+    if last is not None:
+        floor = datetime.fromisoformat(last) + timedelta(microseconds=1)
+        now = max(now, floor)
+    return now.isoformat(sep=" ", timespec="microseconds")
+
+
+def input_unchanged(latest: tuple, verdict: str, score, comment: str | None) -> bool:
+    """Delta-Regel: eine Eingabe ist unverändert, wenn Verdict und Punkte dem
+    letzten Gold-Eintrag ``(verdict, score, comment)`` derselben Nutzer:in und
+    desselben Checks entsprechen und sie keinen neuen Kommentar trägt (keiner
+    oder derselbe). Ein neuer Kommentar zu gleichem Wert wird gespeichert.
+    Gegenstück im Backend: app/evaluation.py ``unchanged``."""
+    last_verdict, last_score, last_comment = latest
+    return (
+        verdict == last_verdict
+        and (None if score is None else float(score)) == (None if last_score is None else float(last_score))
+        and (not comment or comment == last_comment)
+    )
+
+
+def _valid_input(conn: sqlite3.Connection, check_id: str, verdict: str, score) -> str | None:
+    """Fehlertext, falls die Eingabe nicht zum Framework passt (sonst None)."""
+    from grid_con_ingestion.models import VERDICTS
+
+    if verdict not in VERDICTS:
+        return f"unbekannter Verdict {verdict!r}"
+    check = conn.execute("SELECT CheckType, Points FROM EvaluationChecks WHERE ID = ?", (check_id,)).fetchone()
+    if check is None:
+        return f"unbekannter Check {check_id!r}"
+    if score is not None and not (0 <= score <= check[1]):
+        return f"Punkte {score} außerhalb 0…{check[1]}"
+    return None
+
+
+def write_gold(db_path: str | Path) -> GoldStats:
+    """BronzeToGold: alle UserEvaluationInputs mit ``Timestamp`` nach dem
+    InputBronzeTimestamp des vorherigen Laufs → RequestEvaluationChecks.
+
+    Jede Eingabe bekommt eine BusinessTransaction (auch verworfene und
+    unveränderte, so rückt die Wasserlinie immer vor). Ein Gold-Eintrag mit fortlaufender
+    ``Version`` je Antrag (``id_gronos_new``), Nutzer:in und Check entsteht nur,
+    wenn sich die Eingabe vom letzten Gold-Eintrag unterscheidet (Delta, siehe
+    ``input_unchanged``); eine BusinessTransaction ohne Gold-Eintrag heißt
+    "verarbeitet, unverändert". Das Framework wird vorher abgeglichen
+    (idempotent), damit die Config-Tabellen immer zum Code passen.
+    """
+    from grid_con_ingestion.evaluation_framework import sync_framework
+
+    stats = GoldStats()
+    with write_transaction(db_path) as conn:
+        sync_framework(conn)
+        last = _watermark(conn, "UserEvaluationInputID")
+        stats.previous_input_bronze_timestamp = last
+        rows = conn.execute(
+            "SELECT i.ID, i.GridConnectionRequestID, i.EvaluationCheckID, i.UserID, i.EvaluationVerdict, "
+            "i.EvaluationScore, i.Comment, i.Timestamp, r.id_gronos_new "
+            "FROM UserEvaluationInputs i JOIN GridConnectionRequests r ON r.ID = i.GridConnectionRequestID "
+            "WHERE (? IS NULL OR i.Timestamp > ?) ORDER BY i.Timestamp, i.rowid",
+            (last, last),
+        ).fetchall()
+        stats.inputs = len(rows)
+        now = _utcnow()
+        for input_id, request_id, check_id, user_id, verdict, score, comment, ts, ticket in rows:
+            bt_id = _new_id()
+            conn.execute(
+                "INSERT INTO BusinessTransactions (ID, UserEvaluationInputID, Timestamp, InputBronzeTimestamp) "
+                "VALUES (?, ?, ?, ?)",
+                (bt_id, input_id, now, ts),
+            )
+            stats.business_transactions_inserted += 1
+            problem = _valid_input(conn, check_id, verdict, score)
+            if problem:
+                stats.rows_rejected += 1
+                log.warning("UserEvaluationInputs %s übersprungen: %s", input_id, problem)
+                continue
+            latest = conn.execute(
+                "SELECT c.Version, c.EvaluationVerdict, c.EvaluationScore, c.EvaluationComment "
+                "FROM RequestEvaluationChecks c "
+                "JOIN GridConnectionRequests r ON r.ID = c.GridConnectionRequestID "
+                "WHERE c.UserID = ? AND c.EvaluationCheckID = ? AND "
+                "(r.id_gronos_new = ? OR (? IS NULL AND r.ID = ?)) ORDER BY c.Version DESC LIMIT 1",
+                (user_id, check_id, ticket, ticket, request_id),
+            ).fetchone()
+            if latest is not None and input_unchanged(latest[1:], verdict, score, comment):
+                stats.rows_unchanged += 1
+                continue
+            version = (latest[0] if latest else 0) + 1
+            conn.execute(
+                "INSERT INTO RequestEvaluationChecks (ID, GridConnectionRequestID, UserID, EvaluationCheckID, "
+                "BusinessTransactionID, EvaluationVerdict, EvaluationScore, EvaluationComment, Version, Timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (_new_id(), request_id, user_id, check_id, bt_id, verdict, score, comment, version, ts),
+            )
+            stats.checks_inserted += 1
+    return stats
+
+
+# --------------------------------------------------------------------------- #
+# Nutzer:innen
+# --------------------------------------------------------------------------- #
+def upsert_users(conn: sqlite3.Connection, users: list[dict]) -> dict[str, int]:
+    """Legt Nutzer:innen über die E-Mail an bzw. aktualisiert Name und Rolle."""
+    from grid_con_ingestion.models import ROLES
+
+    inserted = updated = 0
+    for u in users:
+        email = u["email"].strip().lower()
+        if u["role"] not in ROLES:
+            raise ValueError(f"Unbekannte Rolle {u['role']!r}, erlaubt: {list(ROLES)}")
+        row = conn.execute("SELECT ID, Name, Role FROM Users WHERE Email = ?", (email,)).fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT INTO Users (ID, Email, Name, Role) VALUES (?, ?, ?, ?)",
+                (_new_id(), email, u.get("name"), u["role"]),
+            )
+            inserted += 1
+        elif (row[1], row[2]) != (u.get("name"), u["role"]):
+            conn.execute("UPDATE Users SET Name = ?, Role = ? WHERE ID = ?", (u.get("name"), u["role"], row[0]))
+            updated += 1
+    return {"users_inserted": inserted, "users_updated": updated}

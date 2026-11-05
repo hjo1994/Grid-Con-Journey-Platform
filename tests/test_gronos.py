@@ -209,7 +209,7 @@ def test_bronze_to_silver_watermark_versions_and_timestamps(tmp_path):
 
     bts = rows(
         db,
-        "SELECT bt.TimestampImportBronze, e.Timestamp, bt.TimestampImportSilver, r.timestamp "
+        "SELECT bt.InputBronzeTimestamp, e.Timestamp, bt.Timestamp, r.timestamp "
         "FROM BusinessTransactions bt JOIN GronosExports e ON e.ID = bt.GronosExportID "
         "LEFT JOIN GridConnectionRequests r ON r.BusinessTransactionID = bt.ID",
     )

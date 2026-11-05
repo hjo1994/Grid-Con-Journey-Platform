@@ -150,14 +150,19 @@ def test_silver_versions_changed_requests(sample, tmp_path):
     assert con.execute(
         "SELECT COUNT(*) FROM GridConnectionRequests WHERE CustomerID IS NULL OR BusinessTransactionID IS NULL OR timestamp IS NULL"
     ).fetchone()[0] == 0
-    assert not (db.parent / "grid_con.new.db").exists()   # Arbeitskopie aufgeräumt
+    assert not (db.parent / "grid_con.new.db").exists()   # keine Arbeitskopie (Schreiben in place)
 
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert tables == {
-        "C4CExports", "GronosExports", "BusinessTransactions", "GridConnectionRequests", "GridConnectionCustomers"
+        "C4CExports", "GronosExports", "BusinessTransactions", "GridConnectionRequests", "GridConnectionCustomers",
+        "Users", "UserEvaluationInputs", "RequestEvaluationChecks",
+        "EvaluationCriteria", "EvaluationSubCriteria", "EvaluationChecks",
     }
+    bts = con.execute("SELECT Timestamp, InputBronzeTimestamp FROM BusinessTransactions").fetchall()
+    assert all(silver and bronze and silver >= bronze for silver, bronze in bts)
 
-    for table in tables:                                   # Primärschlüssel sind UUIDs
+    data_tables = {"C4CExports", "BusinessTransactions", "GridConnectionRequests", "GridConnectionCustomers"}
+    for table in data_tables:                              # Primärschlüssel sind UUIDs
         for (pk,) in con.execute(f"SELECT ID FROM {table}"):
             assert str(uuid.UUID(pk)) == pk
 
