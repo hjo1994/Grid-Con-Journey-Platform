@@ -1,7 +1,7 @@
 // Criteria timeline in the "Graphit" design with the calendar build-up
 // "Spur" (mockup journey.html: timeline(r, 'd', 'kal-spur') and initTl).
 import { evText, fmt, fmtT, ago, ME, ROLES, SUBS, TODAY, type Ev, type Req, type Role, type Sub } from "./data";
-import { $, $$, esc, hover, tip, type Life } from "./ui";
+import { $, $$, esc, hover, isSeen, markSeen, tip, type Life } from "./ui";
 
 const tnum = (x: number, y: number, t: string | number | undefined, fill: string, fs = 13) =>
   `<text x="${x}" y="${y + fs * 0.35}" text-anchor="middle" font-size="${fs}" font-weight="600" font-family="var(--f-mono)" fill="${fill}">${t}</text>`;
@@ -66,20 +66,19 @@ export function timelineHtml(r: Req): { html: string; geo: Geo } {
       ${st.turn ? `<line class="wt wait" data-a="${xl + (pts.length ? 16 : 0)}" x1="${xl + (pts.length ? 16 : 0)}" x2="${xl}" y1="${y}" y2="${y}" stroke="${TH.wait(me)}" stroke-width="1.5"/>` : ""}${dots}${end}<rect class="tip" x="-1.5" y="${y - 7}" width="3" height="14" fill="var(--accent)"/></g>`;
   }).join("");
   const leg = TH.legend.map(([e, lab]) => `<span><svg width="34" height="34" viewBox="-22 -24 44 44">${TH.dot(0, 0, { type: "bewertet", ...e })}</svg>${lab}</span>`).join("");
-  const html = `<div class="box tl2 th-d fx-kal-spur fx-kalender" data-fx="kal-spur"><div class="tlhead"><button class="btn pri tlplay" type="button">❚❚ Pause</button><div class="tlstat"><b class="tldate">–</b><span class="tlsum dim"></span></div></div>
+  const html = `<div class="box tl2 th-d fx-kal-spur fx-kalender" data-fx="kal-spur"><div class="tlhead"><div class="tlstat"><b class="tldate">–</b><span class="tlsum dim"></span></div></div>
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Zeitstrahl der Bewertung"><defs><linearGradient id="beamg" x1="0" x2="1"><stop offset="0" stop-color="#5aa9ff" stop-opacity="0"/><stop offset="1" stop-color="#5aa9ff" stop-opacity=".3"/></linearGradient></defs>${grid}<rect class="dayc" x="0" y="${T - 6}" width="${(xt - L) / ((t1 - +t0) / 864e5)}" height="${H - T}" fill="var(--accent)" opacity=".08"/><text class="wm" x="${xt - 24}" y="${H - 36}" text-anchor="end" font-size="150" font-weight="600" letter-spacing="-4" font-family="var(--f-mono)" fill="var(--fg)" opacity=".055"></text>
     <g class="ph"><rect class="beam" x="-170" y="${T - 6}" width="170" height="${H - T}" fill="url(#beamg)"/><line y1="${T - 28}" y2="${H - 6}" stroke="var(--accent)" stroke-width="1.25"/><rect x="-25" y="${T - 48}" width="50" height="20" rx="2" fill="var(--accent)"/><text class="pht phl" y="${T - 35}" text-anchor="middle" font-size="11" font-weight="600" font-family="var(--f-mono)"></text></g>${rows}</svg>
-    <div class="tlsl" style="padding-left:${L / W * 100}%;padding-right:${RP / W * 100}%"><input type="range" class="tlr" min="0" max="1000" value="0" aria-label="Zeitpunkt"></div>
     <div class="tlleg">${leg}</div></div>`;
   return { html, geo: { W, L, RP, xt, t0: +t0, t1, tips } };
 }
 
-// Player: the day column with its fading trail sweeps from the first day to
-// today once the timeline is visible; button and slider control it.
-export function initTimeline(host: HTMLElement, c: Geo, life: Life) {
+// Build-up: the day column with its fading trail sweeps once from the first
+// day to today when the timeline first becomes visible; afterwards (and on
+// every later visit) it is shown finished.
+export function initTimeline(host: HTMLElement, c: Geo, life: Life, key: string) {
   let raf = 0;
   life.add(() => cancelAnimationFrame(raf));
-  const sl = $<HTMLInputElement>(host, ".tlr"), btn = $<HTMLButtonElement>(host, ".tlplay");
   const ph = $(host, ".ph"), span = c.xt - c.L;
   const rows = $$(host, ".row").map((g) => ({
     g, evs: $$<SVGGElement>(g, ".ev"), ln: g.querySelector<SVGLineElement>(".ln"), wt: g.querySelector<SVGLineElement>(".wt"),
@@ -88,7 +87,7 @@ export function initTimeline(host: HTMLElement, c: Geo, life: Life) {
   const evs = rows.flatMap((r) => r.evs);
   const DUR = 3600;
   const gpx = (p: number) => c.L + span * p;
-  let P = 0, playing = false;
+  let P = 0;
   const atEnd = () => P >= 1 - 1e-6;
   function set(p: number) {
     P = Math.max(0, Math.min(1, p));
@@ -114,24 +113,19 @@ export function initTimeline(host: HTMLElement, c: Geo, life: Life) {
     const on = evs.filter((e) => e.classList.contains("on"));
     const nr = on.filter((e) => e.dataset.rate === "1" && e.dataset.fin !== "1").length, nf = on.filter((e) => e.dataset.fin === "1").length;
     $(host, ".tlsum").textContent = `${nr} Bewertung${nr === 1 ? "" : "en"} abgegeben · ${nf} von 7 festgelegt`;
-    sl.value = String(Math.round(P * 1000));
   }
-  const lab = () => (btn.textContent = atEnd() ? "↻ Nochmal abspielen" : "▶ Weiter");
-  function stop() { playing = false; cancelAnimationFrame(raf); lab(); }
   function play() {
-    if (atEnd()) set(0);
-    playing = true; btn.textContent = "❚❚ Pause";
-    const from = P, dur = DUR * (1 - from), s = performance.now();
+    markSeen(key);
+    const s = performance.now();
     const step = (now: number) => {
-      const k = Math.min(1, (now - s) / dur);
-      set(from + (1 - from) * k);
-      if (k < 1 && playing) raf = requestAnimationFrame(step); else if (k >= 1) stop();
+      const k = Math.min(1, (now - s) / DUR);
+      set(k);
+      if (k < 1) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
   }
-  btn.onclick = () => (playing ? stop() : play());
-  sl.oninput = () => { stop(); set(+sl.value / 1000); lab(); };
   $$(host, ".ev[data-tip]").forEach((g) => hover(g, () => { const e = c.tips[+g.dataset.tip!]; return tip(e.role, `${evText(e)} · ${fmtT(e.t)}`, e.text); }));
+  if (isSeen(key)) { set(1); return; }
   set(0);
   if ("IntersectionObserver" in window) {
     const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); play(); } }, { threshold: 0.3 });

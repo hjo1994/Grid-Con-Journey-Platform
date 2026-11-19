@@ -2,7 +2,7 @@
 // and the evaluation cockpit "Lesetisch" (mockup cockpit.js: graph(), P1,
 // viewer(), score(), RATE.a).
 import { ago, BY_ID, fmt, guidance, ME, ROLES, STATE, SUB, summarize, type CommentSummary, type Ev, type Guidance, type Req, type Role, type Similar, type Sub, type SubState } from "./data";
-import { $, $$, act, esc, LANES, qt, RC, rk, rn, svgEl, vb, type Life } from "./ui";
+import { $, $$, act, esc, isSeen, LANES, markSeen, qt, RC, rk, rn, svgEl, vb, type Life } from "./ui";
 
 export interface Ctx { key: string; sub: Sub; r: Req; st: SubState; sm: CommentSummary; gd: Guidance }
 export const ctx = (id: number, key: string): Ctx => {
@@ -18,6 +18,9 @@ interface GraphOpts {
   onNow?: () => void;
   nowLabel?: string;
   delay?: number;
+  // shown finished at once (view already seen in this visit, or reduced motion)
+  instant?: boolean;
+  onStart?: () => void;
 }
 type Pt = [number, number];
 
@@ -68,8 +71,25 @@ export function graph(host: HTMLElement, st: SubState, sub: Sub, o: GraphOpts = 
     return g;
   }
   const arrive = (e: Ev, i: number) => { select(i); o.onStep?.(e, i); };
-  const t0 = o.delay || 200;
+  const t0 = o.instant ? 0 : o.delay || 200;
   let tf = t0;
+  const drawFut = (j: number) => {
+    const f = fut[j], i = steps.length + j, [x, y] = pos(f.role, i), c = RC[f.role];
+    const prev: Pt | null = i ? pos(j ? fut[j - 1].role : steps[i - 1].role, i - 1) : null;
+    if (j === 0 && endFx) { endFx(); endFx = null; }
+    if (prev) seg(prev, [x, y], "cfut", o.instant ? 0 : 300, fl);
+    const g = svgEl("g", { class: "cn", style: "cursor:default" }, nl);
+    if (f.now) {
+      svgEl("rect", { class: "now", x: x - 17, y: y - 17, width: 34, height: 34, rx: 4, fill: "none", stroke: c, "stroke-width": 1 }, g);
+      svgEl("rect", { x: x - 13, y: y - 13, width: 26, height: 26, rx: 3, fill: c }, g);
+      svgEl("text", { x, y: y + 3.5, "text-anchor": "middle", "font-size": 9, "font-weight": 700, fill: "#0e1116", "font-family": "var(--f-mono)" }, g).textContent = o.nowLabel || (f.role === ME ? "DU" : "ZUG");
+      if (o.onNow) { g.classList.add("zug"); g.style.cursor = "pointer"; g.addEventListener("click", o.onNow); }
+      svgEl("text", { x, y: H - 4, "text-anchor": "middle", "font-size": 9.5, fill: c, "font-family": "var(--f-mono)" }, g).textContent = "am Zug";
+    } else {
+      svgEl("rect", { x: x - 12, y: y - 12, width: 24, height: 24, rx: 3, fill: "#0e1116", stroke: "#5b6675", "stroke-dasharray": "2 3" }, g);
+      svgEl("text", { x, y: y + 3.5, "text-anchor": "middle", "font-size": 8.5, fill: "var(--fg3)", "font-family": "var(--f-mono)" }, g).textContent = f.role === "BL" ? "fest" : "…";
+    }
+  };
   if (steps.length) {
     // one continuous soft path: a light dot glides from rating to rating and rests on each
     const P = steps.map((e, i) => pos(e.role, i)), lens = [0];
@@ -107,6 +127,10 @@ export function graph(host: HTMLElement, st: SubState, sub: Sub, o: GraphOpts = 
     };
     const prevSelect = o.onSelect;
     o.onSelect = (e, i) => { showCard(i); prevSelect?.(e, i); };
+    if (o.instant) {
+      path.style.strokeDashoffset = "0";
+      steps.forEach((e, i) => { node(e, i); o.onStep?.(e, i); });
+    }
     const MOVE = 620, HOLD = 920, CY = MOVE + HOLD, total = (steps.length - 1) * CY + HOLD;
     const ez = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
     let s0 = 0, shown = 0;
@@ -120,27 +144,20 @@ export function graph(host: HTMLElement, st: SubState, sub: Sub, o: GraphOpts = 
       while (shown <= k) focus(shown++);
       if (t < total) raf = requestAnimationFrame(fr);
     };
-    at(t0 + 250, () => (raf = requestAnimationFrame(fr)));
-    tf = t0 + 250 + total + 150;
+    if (!o.instant) {
+      at(t0 + 250, () => { o.onStart?.(); raf = requestAnimationFrame(fr); });
+      tf = t0 + 250 + total + 150;
+    }
     endFx = () => { $$(nl, ".cn").forEach((q) => q.classList.remove("dimd")); band.style.opacity = "0"; card.classList.remove("on"); };
   }
-  fut.forEach((f, j) => at(tf + j * 200, () => {
-    const i = steps.length + j, [x, y] = pos(f.role, i), c = RC[f.role];
-    const prev: Pt | null = i ? pos(j ? fut[j - 1].role : steps[i - 1].role, i - 1) : null;
-    if (j === 0 && endFx) { endFx(); endFx = null; }
-    if (prev) seg(prev, [x, y], "cfut", 300, fl);
-    const g = svgEl("g", { class: "cn", style: "cursor:default" }, nl);
-    if (f.now) {
-      svgEl("rect", { class: "now", x: x - 17, y: y - 17, width: 34, height: 34, rx: 4, fill: "none", stroke: c, "stroke-width": 1 }, g);
-      svgEl("rect", { x: x - 13, y: y - 13, width: 26, height: 26, rx: 3, fill: c }, g);
-      svgEl("text", { x, y: y + 3.5, "text-anchor": "middle", "font-size": 9, "font-weight": 700, fill: "#0e1116", "font-family": "var(--f-mono)" }, g).textContent = o.nowLabel || (f.role === ME ? "DU" : "ZUG");
-      if (o.onNow) { g.classList.add("zug"); g.style.cursor = "pointer"; g.addEventListener("click", o.onNow); }
-      svgEl("text", { x, y: H - 4, "text-anchor": "middle", "font-size": 9.5, fill: c, "font-family": "var(--f-mono)" }, g).textContent = "am Zug";
-    } else {
-      svgEl("rect", { x: x - 12, y: y - 12, width: 24, height: 24, rx: 3, fill: "#0e1116", stroke: "#5b6675", "stroke-dasharray": "2 3" }, g);
-      svgEl("text", { x, y: y + 3.5, "text-anchor": "middle", "font-size": 8.5, fill: "var(--fg3)", "font-family": "var(--f-mono)" }, g).textContent = f.role === "BL" ? "fest" : "…";
-    }
-  }));
+  if (o.instant) {
+    fut.forEach((_, j) => drawFut(j));
+    if (endFx) { endFx(); endFx = null; }
+    select(-1); o.onDone?.();
+    return { stop() { tm.forEach(clearTimeout); cancelAnimationFrame(raf); }, select };
+  }
+  if (!steps.length) at(t0, () => o.onStart?.());
+  fut.forEach((_, j) => at(tf + j * 200, () => drawFut(j)));
   at(tf + fut.length * 200 + 150, () => {
     if (endFx) { endFx(); endFx = null; }
     select(-1); o.onDone?.();
@@ -156,7 +173,7 @@ export function head(c: Ctx) {
     <div class="ck-turn"><span class="st ${cls}">${esc(STATE[s].label)}</span>${st.turn ? `<span>Am Zug: <b style="color:${RC[st.turn]}">${esc(rn(st.turn))}</b>${st.since ? " · " + ago(st.since) : ""}</span>` : st.final != null ? "<span>Bewertung steht fest</span>" : ""}</div>
     <div class="ck-vals">${roles.map((k) => `<div class="${st.turn === k ? "turn" : ""}" style="--c:${RC[k]}"><i>${k}</i><b>${k === "BL" ? (st.final ?? "–") : (st.vals[k] ?? "–")}</b></div>`).join("")}</div></div>`;
 }
-const gbox = () => `<div class="ck-g"><div class="ck-gl"><span class="ck-cap">Bewertungsverlauf</span><button class="ck-re" type="button">↻ Nochmal aufbauen</button></div><div class="gh"></div></div>`;
+const gbox = () => `<div class="ck-g"><div class="ck-gl"><span class="ck-cap">Bewertungsverlauf</span></div><div class="gh"></div></div>`;
 const sum3 = (sm: CommentSummary) => `<div class="sum3">${([["ag", "Einig", sm.agree], ["di", "Strittig", sm.dispute], ["op", "Offen", sm.open]] as const).map(([k, l, a]) => a.map((x) => `<div class="it rv late"><span class="k ${k}">${l}</span><span>${esc(x.text)}<span class="rs">${x.roles.map((r) => rk(r)).join("")}</span></span></div>`).join("")).join("") || '<div class="it rv late"><span class="k">–</span><span class="dim">Noch keine Kommentare zum Zusammenfassen.</span></div>'}</div>`;
 const meta = (q: Similar) => `<span class="meta">${q.req.tech} · ${q.req.mw} MW · ${esc(q.req.uw)}</span>`;
 const whys = (q: Similar) => `<span class="ws">${q.why.map((w) => `<span class="why">${esc(w)}</span>`).join("")}</span>`;
@@ -164,20 +181,30 @@ const none = (t: string) => `<p class="dim" style="margin:6px 0;font-size:13px">
 const late = (root: ParentNode, life: Life, base = 0, gap = 130) => $$(root, ".late").forEach((n, i) => life.timeout(() => n.classList.add("on"), base + i * gap));
 
 /* ---------- 1 · Drei Spalten ---------- */
+export function voicesHtml(c: Ctx) {
+  const { sub, st } = c;
+  return ([...sub.order, "BL"] as Role[]).map((k) => {
+    const ev = st.events.filter((e) => e.role === k), last = ev[ev.length - 1];
+    if (!last) return `<div class="voice none rv late" style="--c:${RC[k]}"><div class="vh">${rk(k)}${esc(rn(k))}</div><p class="tx">${k === "BL" ? "Legt fest, sobald alle Bewertungen vorliegen." : st.turn === k ? "Ist am Zug, noch keine Bewertung." : "Noch keine Bewertung."}</p></div>`;
+    return `<div class="voice rv" data-role="${k}" style="--c:${RC[k]}"><div class="vh">${rk(k)}${esc(rn(k))}${last.tag ? `<span class="tagc">${esc(last.tag)}</span>` : ""}${vb(k === "BL" ? st.final : st.vals[k])}</div><p class="tx">${qt(last)}</p>
+      <div class="hist">${ev.map((e) => fmt(e.t) + " " + (e.type === "geaendert" ? e.from + "→" + e.val : e.type === "angefragt" ? "? an " + e.to : e.val)).join("  ·  ")}</div></div>`;
+  }).join("");
+}
+export const summaryHtml = (sm: CommentSummary) => `<span class="aik">Zusammenfassung</span><p class="tldr rv late">${esc(sm.tldr)}</p>${sum3(sm)}`;
+export const gboxHtml = gbox;
+export const whysHtml = whys;
+// the comparable cases shown as cards (and paged in the Seitenblatt)
+export const simCases = (c: Ctx) => c.gd.sim.slice(0, 4);
+
 export const P1 = {
   html(c: Ctx) {
-    const { sub, st, sm, gd } = c;
-    const voices = ([...sub.order, "BL"] as Role[]).map((k) => {
-      const ev = st.events.filter((e) => e.role === k), last = ev[ev.length - 1];
-      if (!last) return `<div class="voice none rv late" style="--c:${RC[k]}"><div class="vh">${rk(k)}${esc(rn(k))}</div><p class="tx">${k === "BL" ? "Legt fest, sobald alle Bewertungen vorliegen." : st.turn === k ? "Ist am Zug, noch keine Bewertung." : "Noch keine Bewertung."}</p></div>`;
-      return `<div class="voice rv" data-role="${k}" style="--c:${RC[k]}"><div class="vh">${rk(k)}${esc(rn(k))}${last.tag ? `<span class="tagc">${esc(last.tag)}</span>` : ""}${vb(k === "BL" ? st.final : st.vals[k])}</div><p class="tx">${qt(last)}</p>
-        <div class="hist">${ev.map((e) => fmt(e.t) + " " + (e.type === "geaendert" ? e.from + "→" + e.val : e.type === "angefragt" ? "? an " + e.to : e.val)).join("  ·  ")}</div></div>`;
-    }).join("");
-    return gbox() + `<div class="ck-b p1"><div><span class="ck-cap">Stimmen der Beteiligten</span>${voices}</div>
-      <div><span class="aik">Zusammenfassung</span><p class="tldr rv late">${esc(sm.tldr)}</p>${sum3(sm)}</div>
-      <div><span class="ck-cap">Ähnliche Anfragen</span>${gd.sim.length ? `<div class="sugbox rv late"><span class="big">${gd.suggest}</span><b>Vorschlag aus ${gd.sim.length} ähnlichen Fällen</b><p>${esc(gd.because)}</p></div>` + gd.sim.slice(0, 4).map((q) => `<div class="simc rv late">${vb(q.val, q.val === gd.suggest ? "sug" : "")}<div class="nm">${esc(q.req.name)} ${meta(q)}</div><div class="qt">„${esc(q.quote)}“ ${q.by ? rk(q.by) : ""}</div>${whys(q)}</div>`).join("") : none("Keine vergleichbaren Anfragen gefunden.")}</div></div>`;
+    const { gd } = c;
+    return gbox() + `<div class="ck-b p1"><div><span class="ck-cap">Stimmen der Beteiligten</span>${voicesHtml(c)}</div>
+      <div>${summaryHtml(c.sm)}</div>
+      <div><span class="ck-cap">Ähnliche Anfragen</span>${gd.sim.length ? `<div class="sugbox rv late"><span class="big">${gd.suggest}</span><b>Vorschlag aus ${gd.sim.length} ähnlichen Fällen</b><p>${esc(gd.because)}</p></div>` + simCases(c).map((q, i) => `<div class="simc rv late" data-sim="${i}" role="button" tabindex="0" aria-label="${esc(q.req.name)}: Seitenblatt mit dem Cockpit öffnen">${vb(q.val, q.val === gd.suggest ? "sug" : "")}<div class="nm">${esc(q.req.name)} ${meta(q)}</div><div class="qt">„${esc(q.quote)}“ ${q.by ? rk(q.by) : ""}</div>${whys(q)}<span class="sim-go">Seitenblatt öffnen →</span></div>`).join("") : none("Keine vergleichbaren Anfragen gefunden.")}</div></div>`;
   },
-  run(root: ParentNode, life: Life) {
+  run(root: ParentNode, life: Life, instant = false) {
+    if (instant) return { onStep: () => undefined, onDone: () => $$(root, ".rv").forEach((n) => n.classList.add("on")) };
     return {
       onStep: (e: Ev) => { root.querySelector(`.voice[data-role="${e.role}"]`)?.classList.add("on"); },
       onDone: () => late(root, life),
@@ -238,41 +265,36 @@ const hlc = (d: Doc) => {
 };
 const by = (h: Highlight) => `${rk(h.role, "fill")}<b>${esc(ROLES[h.role].name)}</b> markiert für Bewertung ${vb(h.val, "sm")}`;
 
-/* Document with a guided tour through the marked passages */
+/* Document with a tour through the marked passages, moved on by the user only */
 function viewer(host: HTMLElement, d: Doc) {
   const mk = (s: Section) => esc(s.x).replace(/\[\[(\d)\|([^\]]+)\]\]/g, (_m, i: string, tx: string) => `<mark data-h="${i}" style="--c:${RC[d.hl[+i].role]}">${tx}</mark>`);
   host.innerHTML = `<div class="dv"><div class="dv-h"><b>${esc(d.name)}</b><span class="meta">${d.kind} · ${d.date} · ${d.pages} S.</span>
-      <span class="dv-ctl"><button type="button" data-a="prev" title="Vorherige Stelle">◂</button><span class="dv-n"></span><button type="button" data-a="next" title="Nächste Stelle">▸</button><button type="button" data-a="play" title="Führung anhalten oder fortsetzen">❚❚</button></span></div><div class="dv-prog"><i></i></div>
+      <span class="dv-ctl"><button type="button" data-a="prev" title="Vorherige Stelle" aria-label="Vorherige Stelle">◂</button><span class="dv-n" aria-live="polite"></span><button type="button" data-a="next" title="Nächste Stelle" aria-label="Nächste Stelle">▸</button></span></div><div class="dv-prog"><i></i></div>
     <div class="dv-b"><div class="dv-page">${d.secs.map((s, i) => `<section data-s="${i}"><h5><span>${esc(s.t)}</span><span>S. ${s.p}</span></h5><p>${mk(s)}</p></section>`).join("")}</div><div class="dv-side"><div class="dv-note"></div></div></div></div>`;
-  const page = $(host, ".dv-page"), note = $(host, ".dv-note"), nEl = $(host, ".dv-n"), prog = $(host, ".dv-prog i"), pb = $(host, '[data-a="play"]');
+  const page = $(host, ".dv-page"), note = $(host, ".dv-note"), nEl = $(host, ".dv-n"), prog = $(host, ".dv-prog i");
+  const prev = $<HTMLButtonElement>(host, '[data-a="prev"]'), next = $<HTMLButtonElement>(host, '[data-a="next"]');
   const tms: number[] = [];
-  let cur = -1, tm = 0, playing = true;
-  const HOLD = 2600;
+  let cur = -1;
   function go(i: number) {
-    clearTimeout(tm);
     if (i < 0 || i >= d.st.length) return;
     cur = i;
     const h = d.st[i], m = $(page, `mark[data-h="${i}"]`);
-    $$(page, "mark").forEach((x) => { const k = +x.dataset.h!; x.classList.toggle("cur", k === i); if (k < i) x.classList.add("seen"); });
+    $$(page, "mark").forEach((x) => { const k = +x.dataset.h!; x.classList.toggle("cur", k === i); x.classList.toggle("seen", k < i); });
     $$(page, "section").forEach((s) => s.classList.toggle("cur", +s.dataset.s! === h.si));
     const top = Math.max(0, m.offsetTop - 96);
     page.scrollTo({ top, behavior: "smooth" });
     note.style.setProperty("--c", RC[h.role]); note.classList.remove("on");
     tms.push(window.setTimeout(() => { note.innerHTML = `<div>${by(h)}</div><p>„${esc(h.note)}“</p>`; note.style.transform = `translateY(${Math.max(8, m.offsetTop - top - 6)}px)`; note.classList.add("on"); }, 240));
-    nEl.textContent = `Stelle ${i + 1}/${d.st.length}`;
-    prog.style.transition = "none"; prog.style.width = (i / d.st.length * 100) + "%";
-    if (playing) {
-      requestAnimationFrame(() => requestAnimationFrame(() => { prog.style.transition = `width ${HOLD}ms linear`; prog.style.width = ((i + 1) / d.st.length * 100) + "%"; }));
-      tm = window.setTimeout(() => { if (i + 1 < d.st.length) go(i + 1); else { playing = false; pb.textContent = "↻"; } }, HOLD);
-    }
+    nEl.textContent = `Stelle ${i + 1} von ${d.st.length}`;
+    prog.style.width = ((i + 1) / d.st.length * 100) + "%";
+    prev.disabled = i === 0; next.disabled = i === d.st.length - 1;
   }
-  $(host, '[data-a="prev"]').addEventListener("click", () => { playing = false; pb.textContent = "▶"; go(Math.max(0, cur - 1)); });
-  $(host, '[data-a="next"]').addEventListener("click", () => { playing = false; pb.textContent = "▶"; go(Math.min(d.st.length - 1, cur + 1)); });
-  pb.addEventListener("click", () => { playing = !playing; pb.textContent = playing ? "❚❚" : "▶"; if (playing) go(cur + 1 < d.st.length ? cur : 0); else { clearTimeout(tm); prog.style.transition = "none"; } });
-  $$(page, "mark").forEach((m) => m.addEventListener("click", () => { playing = false; pb.textContent = "▶"; go(+m.dataset.h!); }));
-  if (d.st.length) tm = window.setTimeout(() => go(0), 500);
-  else { nEl.textContent = "Keine Stellen"; note.innerHTML = '<p style="color:var(--fg2)">In diesem Dokument hat noch niemand eine Stelle markiert.</p>'; note.style.transform = "translateY(12px)"; note.classList.add("on"); }
-  return { stop() { clearTimeout(tm); tms.forEach(clearTimeout); } };
+  prev.addEventListener("click", () => go(cur - 1));
+  next.addEventListener("click", () => go(cur + 1));
+  $$(page, "mark").forEach((m) => m.addEventListener("click", () => go(+m.dataset.h!)));
+  if (d.st.length) go(0);
+  else { nEl.textContent = "Keine Stellen"; prev.disabled = next.disabled = true; note.innerHTML = '<p style="color:var(--fg2)">In diesem Dokument hat noch niemand eine Stelle markiert.</p>'; note.style.transform = "translateY(12px)"; note.classList.add("on"); }
+  return { stop() { tms.forEach(clearTimeout); } };
 }
 
 /* ---------- 3 · evaluation cockpit "Lesetisch" ---------- */
@@ -284,14 +306,16 @@ export function lesetisch(box: HTMLElement, id: number, key: string, life: Life)
   let v: { stop(): void } | null = null;
   const open = (did: string) => { v?.stop(); $$(box, ".dcard").forEach((b) => b.classList.toggle("sel", b.dataset.d === did)); v = viewer($(box, ".zview"), DOCS.find((d) => d.id === did)!); };
   $$(box, ".dcard").forEach((b) => b.addEventListener("click", () => open(b.dataset.d!)));
-  $$(box, ".dcard").forEach((n, i) => life.timeout(() => n.classList.add("on"), 150 + i * 120));
-  score($(box, ".zscore"), c, role, others, life);
-  life.timeout(() => open(DOCS[0].id), 750);
+  const instant = isSeen(`rate:${id}:${key}`);
+  markSeen(`rate:${id}:${key}`);
+  $$(box, ".dcard").forEach((n, i) => (instant ? n.classList.add("on") : life.timeout(() => n.classList.add("on"), 150 + i * 120)));
+  score($(box, ".zscore"), c, role, others, life, instant);
+  if (instant) open(DOCS[0].id); else life.timeout(() => open(DOCS[0].id), 750);
   life.add(() => v?.stop());
 }
 
 /* Choosing the rating, with what follows from it */
-function score(host: HTMLElement, c: Ctx, role: Role, others: Role[], life: Life) {
+function score(host: HTMLElement, c: Ctx, role: Role, others: Role[], life: Life, instant: boolean) {
   const { sub, st } = c, n = sub.max + 1;
   host.innerHTML = `<div class="sc" style="--n:${n}"><span class="ck-cap">${role === "BL" ? "Festlegung" : role === ME ? "Deine Bewertung" : "Bewertung"} für ${sub.label}</span>
     <div class="sc-opts">${[...Array(n).keys()].map((v) => `<button type="button" class="sc-o rv ${v === c.gd.suggest ? "sug" : ""}" data-v="${v}"><b>${v}</b><span>${esc(sub.levels[v])}</span>
@@ -306,5 +330,5 @@ function score(host: HTMLElement, c: Ctx, role: Role, others: Role[], life: Life
     out.classList.add("on");
     $(out, ".sc-go").addEventListener("click", (e) => { const t = e.currentTarget as HTMLElement; t.classList.add("done"); t.textContent = "✓ Abgegeben (Demo, nicht gespeichert)"; });
   }));
-  $$(host, ".sc-o").forEach((b, i) => life.timeout(() => b.classList.add("shown"), 500 + i * 110));
+  $$(host, ".sc-o").forEach((b, i) => (instant ? b.classList.add("shown") : life.timeout(() => b.classList.add("shown"), 500 + i * 110)));
 }

@@ -78,3 +78,11 @@ export class Life {
     this.stops.splice(0).forEach((f) => f());
   }
 }
+
+// Build-ups run once per view and visit; afterwards the view is shown finished.
+// A view is marked when its animation actually starts (not on mount, so the
+// StrictMode double mount in dev does not count as a visit).
+const seenViews = new Set<string>();
+export const isSeen = (key: string) => seenViews.has(key) || reducedMotion();
+export const markSeen = (key: string) => { seenViews.add(key); };
+export const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;

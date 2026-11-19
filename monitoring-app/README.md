@@ -14,6 +14,10 @@ Monitoring. Anmeldung wie bisher (`AuthApp.tsx`, OIDC), danach nur Demo-Daten
 Anfragen (Variante A „Register“), `#/anfragen/<id>` Kriterien (Zeitstrahl
 „Spur“), darin per Klick das Sub-Kriterium-Cockpit „Drei Spalten“ (Graph
 „Pfad · Karte“) und über den ZUG-Knoten das Bewertungs-Cockpit „Lesetisch“.
+Ein Klick auf eine ähnliche Anfrage öffnet das Seitenblatt mit ihrem Cockpit
+für dasselbe Sub-Kriterium (nur lesen, blättern mit ◂ ▸, schließen mit Esc).
+Aufbau-Animationen laufen je Ansicht einmal pro Besuch, ohne Abspiel- oder
+Wiederholen-Knöpfe.
 Die Bestehensschwelle (6 von 11 Punkten) ist ein Platzhalter
 (`PASS_THRESHOLD` in `src/journey/data/index.ts`). Testdaten: jedes
 Sub-Kriterium hat mindestens drei Bewertungen im Verlauf, viele warten auf

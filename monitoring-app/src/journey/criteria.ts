@@ -3,8 +3,9 @@
 // (mockup cockpit.js, journey block for ZONLY 'j').
 import { BY_ID, ME, PASS_THRESHOLD, ROLES, SUB, SUBS } from "./data";
 import { ctx, graph, head, lesetisch, P1 } from "./cockpit";
+import { Sheet } from "./sheet";
 import { initTimeline, timelineHtml } from "./timeline";
-import { $, $$, esc, Life, RC, removePop } from "./ui";
+import { $, $$, esc, isSeen, Life, markSeen, RC, removePop } from "./ui";
 
 export function mountCriteria(app: HTMLElement, id: number, onBack: () => void) {
   const life = new Life(), r = BY_ID[id], s = r.sum;
@@ -25,9 +26,11 @@ export function mountCriteria(app: HTMLElement, id: number, onBack: () => void) 
   requestAnimationFrame(() => requestAnimationFrame(() => { $(app, ".rsc .bar i").style.width = (pts / max * 100) + "%"; }));
 
   const tsec = $(app, ".zsec"), tl2 = $(tsec, ".tl2"), cka = $(app, ".cka"), steps = $$(app, ".jsteps button");
-  initTimeline(tl2, tl.geo, life);
+  initTimeline(tl2, tl.geo, life, `tl:${id}`);
 
   let cur: string | null = null, gr: { stop(): void } | null = null, busy = false, isOpen = false;
+  const sheet = new Sheet();
+  life.add(() => sheet.close(false));
   const rate = new Life();
   life.add(() => { gr?.stop(); rate.stop(); });
   const step = (n: number) => steps.forEach((b) => { const k = +b.dataset.s!; b.classList.toggle("on", k === n); b.classList.toggle("done", k < n); });
@@ -42,21 +45,27 @@ export function mountCriteria(app: HTMLElement, id: number, onBack: () => void) 
     $(cka, ".ckback").addEventListener("click", back);
     $$(cka, ".cksubs button").forEach((b) => b.addEventListener("click", () => {
       if (b.dataset.k === cur) return;
-      stopG(); stopR(); isOpen = false;
+      sheet.close(false); stopG(); stopR(); isOpen = false;
       fill(b.dataset.k!); cka.classList.add("in"); $(cka, ".ck-body").style.maxHeight = "none"; step(2); build();
     }));
   }
   function build() {
     stopG();
     const cx = ctx(id, cur!), inn = $(cka, ".ck-in"), turn = cx.st.turn, mine = turn === ME;
+    const seenKey = `ck:${id}:${cur}`, instant = isSeen(seenKey);
     inn.innerHTML = P1.html(cx);
-    const hk = P1.run(cka, life);
+    const hk = P1.run(cka, life, instant);
     $(inn, ".ck-g").insertAdjacentHTML("afterend", `<div class="zhint"><i style="background:${turn ? RC[turn] : "var(--fg3)"}"></i>${mine ? "Du bist am Zug. Klick auf ZUG, um zu bewerten." : turn ? `${esc(ROLES[turn].name)} ist am Zug. Klick auf ZUG öffnet das Bewertungs-Cockpit.` : ""}</div><div class="zwrap"><div class="zbar"><span class="ck-cap">Bewertungs-Cockpit</span><button type="button" class="ck-re zclose" style="margin-left:auto">Schließen</button></div><div class="zrate"></div></div>`);
     $(inn, ".zclose").addEventListener("click", closeRate);
-    $(inn, ".ck-re").addEventListener("click", () => { isOpen = false; stopR(); build(); });
     const hint = $(inn, ".zhint");
+    // comparable cases open the Seitenblatt
+    $$(inn, ".simc").forEach((card) => {
+      const go = () => sheet.open(cx, +card.dataset.sim!, card);
+      card.addEventListener("click", go);
+      card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    });
     gr = graph($(inn, ".gh"), cx.st, cx.sub, {
-      nowLabel: "ZUG", onStep: hk.onStep, onNow: () => openRate(),
+      nowLabel: "ZUG", instant, onStart: () => markSeen(seenKey), onStep: hk.onStep, onNow: () => openRate(),
       onDone: () => { hk.onDone(); if (turn && !isOpen) hint.classList.add("on"); },
     });
   }
@@ -106,7 +115,7 @@ export function mountCriteria(app: HTMLElement, id: number, onBack: () => void) 
     }, 980);
   }
   function back() {
-    stopG(); stopR(); isOpen = false;
+    sheet.close(false); stopG(); stopR(); isOpen = false;
     cka.classList.remove("show", "in"); cka.innerHTML = ""; cur = null; step(1);
     $(app, ".js2").textContent = "Cockpit";
     tsec.style.display = ""; tl2.classList.remove("picking"); $$(tl2, ".row").forEach((rw) => rw.classList.remove("pick"));

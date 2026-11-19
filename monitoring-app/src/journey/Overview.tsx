@@ -1,9 +1,10 @@
 // Requests overview, variant A "Register" (mockup cockpit.js, OV.a): the
 // table as known plus a "Bewertung" column with a thin bar (one segment per
 // sub-criterion) and one sentence where the evaluation stands.
-import { useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 
 import { days, fmt, ME, PASS_THRESHOLD, REQUESTS, ROLES, SUB, SUBS, TODAY, type Req, type Role, type Sub, type SubState } from "./data";
+import { isSeen, markSeen } from "./ui";
 
 interface Info {
   r: Req;
@@ -48,8 +49,9 @@ const val = (i: Info, k: Key): number | string => (k === "gs" ? gronosStatus(i.r
 
 export function Overview({ onOpen }: { onOpen: (id: number) => void }) {
   const [sort, setSort] = useState<{ k: Key; d: number }>({ k: "ev", d: 1 });
-  // every new value re-mounts the rows, so their fade-in plays again
-  const [play, setPlay] = useState(0);
+  // rows fade in once, on the first visit; sorting and coming back show them as they are
+  const [animate] = useState(() => !isSeen("overview"));
+  useEffect(() => markSeen("overview"), []);
   const [tip, setTip] = useState<{ x: number; y: number; id: number } | null>(null);
 
   const rows = useMemo(
@@ -57,7 +59,7 @@ export function Overview({ onOpen }: { onOpen: (id: number) => void }) {
     [sort],
   );
   const nMine = INFO.filter((i) => i.mine).length, nOpen = INFO.filter((i) => !i.fin).length, nFin = INFO.length - nOpen;
-  const clickHead = (k: Key) => { setSort((s) => (s.k === k ? { k, d: -s.d } : { k, d: 1 })); setPlay((p) => p + 1); };
+  const clickHead = (k: Key) => setSort((s) => (s.k === k ? { k, d: -s.d } : { k, d: 1 }));
   const move = (e: MouseEvent, id: number) => setTip({ x: Math.min(window.innerWidth - 380, e.clientX + 14), y: Math.min(window.innerHeight - 110, e.clientY + 16), id });
   const tipRow = tip && INFO.find((x) => x.r.id === tip.id)!;
   const tipInfo = tipRow && { i: tipRow, e: evalState(tipRow) };
@@ -80,7 +82,6 @@ export function Overview({ onOpen }: { onOpen: (id: number) => void }) {
             <span><b>{nOpen}</b>in Bewertung</span>
             <span><b>{nFin}</b>abgeschlossen</span>
           </div>
-          <button type="button" className="ck-re" onClick={() => setPlay((p) => p + 1)}>↻ Nochmal aufbauen</button>
         </div>
         <div className="oa-h" role="row">
           {HEAD.map(([k, t, c]) => (
@@ -89,7 +90,7 @@ export function Overview({ onOpen }: { onOpen: (id: number) => void }) {
             </button>
           ))}
         </div>
-        <div className="play" key={play}>
+        <div className={animate ? "play" : undefined}>
           {rows.map((i, n) => {
             const e = evalState(i), d = n * 55 + 180, gs = gronosStatus(i.r);
             return (
