@@ -17,7 +17,9 @@ Anfragen (Variante A „Register“), `#/anfragen/<id>` Kriterien (Zeitstrahl
 Ein Klick auf eine ähnliche Anfrage öffnet das Seitenblatt mit ihrem Cockpit
 für dasselbe Sub-Kriterium (nur lesen, blättern mit ◂ ▸, schließen mit Esc).
 Aufbau-Animationen laufen je Ansicht einmal pro Besuch, ohne Abspiel- oder
-Wiederholen-Knöpfe.
+Wiederholen-Knöpfe; beim ersten Öffnen des Lesetischs öffnen sich die
+Dokumente nacheinander von selbst und die markierten Stellen werden live
+hervorgehoben.
 Die Bestehensschwelle (6 von 11 Punkten) ist ein Platzhalter
 (`PASS_THRESHOLD` in `src/journey/data/index.ts`). Testdaten: jedes
 Sub-Kriterium hat mindestens drei Bewertungen im Verlauf, viele warten auf

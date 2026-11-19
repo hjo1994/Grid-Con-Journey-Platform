@@ -23,7 +23,9 @@ export function mountCriteria(app: HTMLElement, id: number, onBack: () => void) 
     <section class="zsec"><h2><b>1</b>Kriterien im Überblick</h2><p>Alle Sub-Kriterien der Anfrage im Zeitstrahl. Klick auf eine Zeile, um ihr Cockpit zu öffnen.</p>${tl.html}</section>
     <div class="cockpit"><div class="ck cka"></div></div>`;
   life.add(() => { app.innerHTML = ""; removePop(); });
-  requestAnimationFrame(() => requestAnimationFrame(() => { $(app, ".rsc .bar i").style.width = (pts / max * 100) + "%"; }));
+  // the view may already be gone again (fast navigation, StrictMode double mount)
+  const bar = $(app, ".rsc .bar i");
+  requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = (pts / max * 100) + "%"; }));
 
   const tsec = $(app, ".zsec"), tl2 = $(tsec, ".tl2"), cka = $(app, ".cka"), steps = $$(app, ".jsteps button");
   initTimeline(tl2, tl.geo, life, `tl:${id}`);

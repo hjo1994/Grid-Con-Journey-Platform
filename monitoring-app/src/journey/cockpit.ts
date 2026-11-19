@@ -2,7 +2,7 @@
 // and the evaluation cockpit "Lesetisch" (mockup cockpit.js: graph(), P1,
 // viewer(), score(), RATE.a).
 import { ago, BY_ID, fmt, guidance, ME, ROLES, STATE, SUB, summarize, type CommentSummary, type Ev, type Guidance, type Req, type Role, type Similar, type Sub, type SubState } from "./data";
-import { $, $$, act, esc, isSeen, LANES, markSeen, qt, RC, rk, rn, svgEl, vb, type Life } from "./ui";
+import { $, $$, act, esc, isSeen, LANES, Life, markSeen, qt, RC, rk, rn, svgEl, vb } from "./ui";
 
 export interface Ctx { key: string; sub: Sub; r: Req; st: SubState; sm: CommentSummary; gd: Guidance }
 export const ctx = (id: number, key: string): Ctx => {
@@ -265,8 +265,9 @@ const hlc = (d: Doc) => {
 };
 const by = (h: Highlight) => `${rk(h.role, "fill")}<b>${esc(ROLES[h.role].name)}</b> markiert für Bewertung ${vb(h.val, "sm")}`;
 
-/* Document with a tour through the marked passages, moved on by the user only */
-function viewer(host: HTMLElement, d: Doc) {
+/* Document with the marked passages. `lit`: all passages already marked (after
+   the build-up). `onUser` runs before any click of the user is handled. */
+function viewer(host: HTMLElement, d: Doc, o: { lit?: boolean; onUser?: () => void } = {}) {
   const mk = (s: Section) => esc(s.x).replace(/\[\[(\d)\|([^\]]+)\]\]/g, (_m, i: string, tx: string) => `<mark data-h="${i}" style="--c:${RC[d.hl[+i].role]}">${tx}</mark>`);
   host.innerHTML = `<div class="dv"><div class="dv-h"><b>${esc(d.name)}</b><span class="meta">${d.kind} · ${d.date} · ${d.pages} S.</span>
       <span class="dv-ctl"><button type="button" data-a="prev" title="Vorherige Stelle" aria-label="Vorherige Stelle">◂</button><span class="dv-n" aria-live="polite"></span><button type="button" data-a="next" title="Nächste Stelle" aria-label="Nächste Stelle">▸</button></span></div><div class="dv-prog"><i></i></div>
@@ -274,12 +275,12 @@ function viewer(host: HTMLElement, d: Doc) {
   const page = $(host, ".dv-page"), note = $(host, ".dv-note"), nEl = $(host, ".dv-n"), prog = $(host, ".dv-prog i");
   const prev = $<HTMLButtonElement>(host, '[data-a="prev"]'), next = $<HTMLButtonElement>(host, '[data-a="next"]');
   const tms: number[] = [];
-  let cur = -1;
+  let cur = -1, lit = !!o.lit;
   function go(i: number) {
     if (i < 0 || i >= d.st.length) return;
     cur = i;
     const h = d.st[i], m = $(page, `mark[data-h="${i}"]`);
-    $$(page, "mark").forEach((x) => { const k = +x.dataset.h!; x.classList.toggle("cur", k === i); x.classList.toggle("seen", k < i); });
+    $$(page, "mark").forEach((x) => { const k = +x.dataset.h!; x.classList.toggle("cur", k === i); x.classList.toggle("seen", k !== i && (lit || k < i)); });
     $$(page, "section").forEach((s) => s.classList.toggle("cur", +s.dataset.s! === h.si));
     const top = Math.max(0, m.offsetTop - 96);
     page.scrollTo({ top, behavior: "smooth" });
@@ -289,12 +290,20 @@ function viewer(host: HTMLElement, d: Doc) {
     prog.style.width = ((i + 1) / d.st.length * 100) + "%";
     prev.disabled = i === 0; next.disabled = i === d.st.length - 1;
   }
-  prev.addEventListener("click", () => go(cur - 1));
-  next.addEventListener("click", () => go(cur + 1));
-  $$(page, "mark").forEach((m) => m.addEventListener("click", () => go(+m.dataset.h!)));
-  if (d.st.length) go(0);
-  else { nEl.textContent = "Keine Stellen"; prev.disabled = next.disabled = true; note.innerHTML = '<p style="color:var(--fg2)">In diesem Dokument hat noch niemand eine Stelle markiert.</p>'; note.style.transform = "translateY(12px)"; note.classList.add("on"); }
-  return { stop() { tms.forEach(clearTimeout); } };
+  const user = (f: () => void) => () => { o.onUser?.(); f(); };
+  prev.addEventListener("click", user(() => go(cur - 1)));
+  next.addEventListener("click", user(() => go(cur + 1)));
+  $$(page, "mark").forEach((m) => m.addEventListener("click", user(() => go(+m.dataset.h!))));
+  if (!d.st.length) { nEl.textContent = "Keine Stellen"; prev.disabled = next.disabled = true; note.innerHTML = '<p style="color:var(--fg2)">In diesem Dokument hat noch niemand eine Stelle markiert.</p>'; note.style.transform = "translateY(12px)"; note.classList.add("on"); }
+  else if (lit) go(0);
+  else { nEl.textContent = `${d.st.length} Stelle${d.st.length > 1 ? "n" : ""}`; prev.disabled = next.disabled = true; }
+  return {
+    go,
+    count: d.st.length,
+    // the build-up is over: every passage stays lightly marked
+    lightAll() { lit = true; if (cur >= 0) go(cur); else if (d.st.length) go(0); },
+    stop() { tms.forEach(clearTimeout); },
+  };
 }
 
 /* ---------- 3 · evaluation cockpit "Lesetisch" ---------- */
@@ -303,15 +312,39 @@ export function lesetisch(box: HTMLElement, id: number, key: string, life: Life)
   const zhead = `<div class="zr-h"><div><span class="lab" style="color:${RC[role]}">BEWERTUNGS-COCKPIT · ${role === ME ? "DU BIST AM ZUG" : "AM ZUG: " + ROLES[role].name.toUpperCase()}</span><h3>${c.sub.label} ${esc(c.sub.name)} ${role === "BL" ? "festlegen" : "bewerten"}</h3></div>
     ${c.st.pending ? `<div class="ask"><b>${esc(ROLES[c.st.pending.role].name)}</b> bittet ${role === ME ? "dich" : ROLES[role].name} um erneute Prüfung: „${esc(c.st.pending.text)}“</div>` : ""}</div>`;
   box.innerHTML = zhead + `<div class="zA"><div class="zdocs"><span class="ck-cap">Relevante Dokumente</span>${DOCS.map((d) => `<button type="button" class="dcard rv" data-d="${d.id}" style="--w:${d.rel}%">${d.neu ? "<em>NEU</em>" : ""}<span class="nm">${esc(d.name)}</span><span class="meta">${d.kind} · ${d.date} · ${d.pages} S.</span><span class="rel"><i></i></span><span class="dw">${esc(d.why)}</span><span class="hlc">${hlc(d)}</span></button>`).join("")}</div><div class="zview"></div><div class="zscore"></div></div>`;
-  let v: { stop(): void } | null = null;
-  const open = (did: string) => { v?.stop(); $$(box, ".dcard").forEach((b) => b.classList.toggle("sel", b.dataset.d === did)); v = viewer($(box, ".zview"), DOCS.find((d) => d.id === did)!); };
-  $$(box, ".dcard").forEach((b) => b.addEventListener("click", () => open(b.dataset.d!)));
-  const instant = isSeen(`rate:${id}:${key}`);
-  markSeen(`rate:${id}:${key}`);
-  $$(box, ".dcard").forEach((n, i) => (instant ? n.classList.add("on") : life.timeout(() => n.classList.add("on"), 150 + i * 120)));
-  score($(box, ".zscore"), c, role, others, life, instant);
-  if (instant) open(DOCS[0].id); else life.timeout(() => open(DOCS[0].id), 750);
-  life.add(() => v?.stop());
+  let v: ReturnType<typeof viewer> | null = null, building = false;
+  // timers of the build-up; any click of the user ends it at once
+  const build = new Life();
+  life.add(() => { build.stop(); v?.stop(); });
+  const finish = () => { if (!building) return; building = false; build.stop(); v?.lightAll(); };
+  const open = (did: string, lit: boolean) => {
+    v?.stop();
+    $$(box, ".dcard").forEach((b) => b.classList.toggle("sel", b.dataset.d === did));
+    v = viewer($(box, ".zview"), DOCS.find((d) => d.id === did)!, { lit, onUser: finish });
+  };
+  $$(box, ".dcard").forEach((b) => b.addEventListener("click", () => { finish(); open(b.dataset.d!, true); }));
+  // the rating can be chosen at once, independent of the build-up
+  score($(box, ".zscore"), c, role, others, life, true);
+  const seenKey = `rate:${id}:${key}`;
+  if (isSeen(seenKey)) {
+    $$(box, ".dcard").forEach((n) => n.classList.add("on"));
+    open(DOCS[0].id, true);
+    return;
+  }
+  markSeen(seenKey);
+  // build-up, once: the documents open one after another, and in each the
+  // passages the others cited are marked live, the view following each one
+  building = true;
+  $$(box, ".dcard").forEach((n, i) => build.timeout(() => n.classList.add("on"), 150 + i * 120));
+  let t = 450;
+  DOCS.forEach((d) => {
+    build.timeout(() => open(d.id, false), t);
+    t += 450;
+    for (let i = 0; i < d.st.length; i++) { build.timeout(() => v?.go(i), t); t += 750; }
+    if (!d.st.length) t += 600;
+  });
+  // done: back to the most relevant document, all passages marked
+  build.timeout(() => { building = false; open(DOCS[0].id, true); }, t + 300);
 }
 
 /* Choosing the rating, with what follows from it */
