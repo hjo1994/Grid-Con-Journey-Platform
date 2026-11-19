@@ -1,7 +1,7 @@
 import { AuthProvider } from "eg-auth-react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
-import App from "./App";
+import JourneyApp from "./journey/JourneyApp";
 import { AuthGate } from "./shared/auth/AuthGate";
 import { authManager } from "./shared/auth/authManager";
 import { LoginPage } from "./shared/auth/LoginPage";
@@ -19,7 +19,7 @@ export default function AuthApp() {
             path="/*"
             element={
               <AuthGate>
-                <App signOut />
+                <JourneyApp signOut />
               </AuthGate>
             }
           />

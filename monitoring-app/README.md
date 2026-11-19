@@ -6,6 +6,20 @@ Stack wie das AI-Cockpit-Frontend: React 18 + Vite + TypeScript, gleiche
 Versionen, Schrift (IBM Plex) als Dateien im Repo (`src/fonts/`, OFL-Lizenzen
 liegen bei), keine externen Requests zur Laufzeit. Oberfläche auf Deutsch.
 
+## Aktuell: Bewertungs-Journey auf Demo-Daten
+
+Die App zeigt derzeit die Bewertungs-Journey (`src/journey/`), nicht das
+Monitoring. Anmeldung wie bisher (`AuthApp.tsx`, OIDC), danach nur Demo-Daten
+(`src/journey/data/`); das Backend wird nicht aufgerufen. Hash-Routen: `#/`
+Anfragen (Variante A „Register“), `#/anfragen/<id>` Kriterien (Zeitstrahl
+„Spur“), darin per Klick das Sub-Kriterium-Cockpit „Drei Spalten“ (Graph
+„Pfad · Karte“) und über den ZUG-Knoten das Bewertungs-Cockpit „Lesetisch“.
+Die Bestehensschwelle (6 von 11 Punkten) ist ein Platzhalter
+(`PASS_THRESHOLD` in `src/journey/data/index.ts`). Testdaten: jedes
+Sub-Kriterium hat mindestens drei Bewertungen im Verlauf, viele warten auf
+die angemeldete Rolle (Flächen & Recht). Das Monitoring (`App.tsx`,
+`styles.css`) bleibt im Code, wird aber nicht eingebunden.
+
 ## Ansicht (abgestimmter Entwurf, Variante A)
 
 - **Kopfzeile** mit Datenstand (`data_as_of` aus den API-Antworten, in
